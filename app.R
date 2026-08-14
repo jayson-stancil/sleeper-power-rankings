@@ -9,6 +9,7 @@
 library(shiny)
 library(gt)
 library(ggplot2)
+library(DT)
 
 # ---- Repo constants (set GH_USER after the repo exists) ---------------------
 GH_USER   <- "jayson-stancil"
@@ -74,10 +75,12 @@ ui <- fluidPage(
     mainPanel(
       width = 9,
       tabsetPanel(
+        id = "main_tabs",
         tabPanel("Rankings", gt_output("rank_table")),
         tabPanel("League Stats",
                  selectInput("stats_view", "View:",
-                            choices = c("Summary", "Rating Trajectory",
+                            choices = c("Summary", "Points For",
+                                       "Rating Trajectory",
                                        "Points Against", "Overall Wins"),
                             selected = "Summary"),
                  conditionalPanel(
@@ -97,6 +100,10 @@ ui <- fluidPage(
                    plotOutput("trajectory", height = "550px")
                  ),
                  conditionalPanel(
+                   "input.stats_view == 'Points For'",
+                   tableOutput("pf_table")
+                 ),
+                 conditionalPanel(
                    "input.stats_view == 'Points Against'",
                    tableOutput("pa_table")
                  ),
@@ -108,11 +115,11 @@ ui <- fluidPage(
                    tableOutput("ow_table")
                  )
         ),
-        tabPanel("Rosters",
-                 selectInput("roster_owner", "Team:", choices = NULL),
-                 helpText("Player values are FantasyCalc redraft prices",
-                          "(NA for unpriced players, e.g. K/DEF)."),
-                 tableOutput("roster_table")
+        tabPanel("Transactions",
+                 helpText("All season adds/drops and trades. Click a column",
+                          "header to sort; use the filter boxes to narrow",
+                          "by Type or Team."),
+                 DT::dataTableOutput("transactions_table")
         ),
         tabPanel("League History",
                  h4("Champions"),
@@ -185,32 +192,29 @@ server <- function(input, output, session) {
       error = function(e) NULL)
   })
 
-  # ---- Rosters ------------------------------------------------------------
+  # ---- Transactions ---------------------------------------------------------
+  # Lazy: nothing here fetches until the Transactions tab is actually opened.
 
-  # Sleeper's full players/nfl reference (~5MB); fetched once per session.
+  # Sleeper's full players/nfl reference (~5MB); fetched once per session,
+  # the first time it's needed.
   players_ref <- reactive(fetch_sleeper_players())
 
-  roster_details <- reactive({
+  transactions_data <- reactive({
+    req(input$main_tabs == "Transactions")
     c_ <- cfg()
-    rosters <- sleeper(paste0("league/", c_$league_id, "/rosters"))
-    build_roster_details(rosters, identity(), players_ref(),
-                         is_dynasty = isTRUE(c_$is_dynasty),
-                         ppr = if (is.null(c_$ppr)) 1 else c_$ppr)
+    withProgress(message = "Loading season transactions...", value = 0.4, {
+      fetch_league_transactions(c_$league_id, 0:18, players_ref(), identity())
+    })
   })
 
-  observeEvent(identity(), {
-    owners <- sort(unique(identity()$owner))
-    updateSelectInput(session, "roster_owner", choices = owners,
-                      selected = owners[1])
-  })
-
-  output$roster_table <- renderTable({
-    rd <- roster_details()
-    me <- req(input$roster_owner)
-    sub <- rd[rd$Owner == me, c("Player", "Position", "NFL", "Value")]
-    validate(need(nrow(sub) > 0, "No roster data for this team."))
-    sub[order(-sub$Value, sub$Player), ]
-  }, striped = TRUE, digits = 0, na = "—")
+  output$transactions_table <- DT::renderDataTable({
+    d <- transactions_data()
+    validate(need(nrow(d) > 0, "No transactions recorded yet."))
+    d$Type <- factor(d$Type, levels = c("Add/Drop", "Trade"))
+    d$Team <- factor(d$Team)
+    d
+  }, filter = "top", rownames = FALSE,
+     options = list(pageLength = 25, order = list(list(0, "desc"))))
 
   # Assembled table for the selected week
   tbl <- reactive({
@@ -379,6 +383,13 @@ server <- function(input, output, session) {
     p
   })
 
+  # ---- League Stats: Points For -------------------------------------------
+
+  output$pf_table <- renderTable({
+    g <- games(); req(g)
+    create_points_for_table(g, identity())
+  }, digits = 2)
+
   # ---- League Stats: Points Against --------------------------------------
 
   output$pa_table <- renderTable({
@@ -400,9 +411,10 @@ server <- function(input, output, session) {
   }, digits = 1)
 
   # ---- League History -----------------------------------------------------
-  # Walks previous_league_id through all seasons. Computed once per session
-  # (reactive caches the result).
+  # Lazy: walks previous_league_id through all seasons the first time the
+  # League History tab is opened, then caches the result for the session.
   history <- reactive({
+    req(input$main_tabs == "League History")
     withProgress(
       message = "Building league history from the Sleeper API...",
       value = 0.4,
