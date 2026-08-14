@@ -76,7 +76,15 @@ ui <- fluidPage(
         tabPanel("Rankings", gt_output("rank_table")),
         tabPanel("Rating trajectory",
                  plotOutput("trajectory", height = "550px")),
-        tabPanel("Points against", tableOutput("pa_table"))
+        tabPanel("Points against", tableOutput("pa_table")),
+        tabPanel("League history",
+                 h4("Champions"),
+                 tableOutput("champions"),
+                 h4("All-time regular-season records"),
+                 tableOutput("alltime"),
+                 h4("Head-to-head (row owner's record vs column owner)"),
+                 div(style = "overflow-x: auto;",
+                     tableOutput("h2h")))
       )
     )
   )
@@ -211,6 +219,34 @@ server <- function(input, output, session) {
     pa$Team <- setNames(ids$owner, ids$roster_id)[as.character(pa$Team)]
     pa[order(pa$total_pa), ]
   }, digits = 1)
+
+  # League history: walks previous_league_id through all seasons.
+  # Computed once per session (reactive caches the result).
+  history <- reactive({
+    withProgress(
+      message = "Building league history from the Sleeper API...",
+      value = 0.4,
+      fetch_league_history(cfg()$league_id, cfg()$owner_map)
+    )
+  })
+
+  output$champions <- renderTable({
+    ch <- history()$champions
+    validate(need(nrow(ch) > 0, "No completed seasons with a champion yet."))
+    ch
+  }, striped = TRUE)
+
+  output$alltime <- renderTable({
+    t <- history()$totals
+    validate(need(!is.null(t), "No completed games in league history yet."))
+    t
+  }, striped = TRUE, digits = 3)
+
+  output$h2h <- renderTable({
+    h <- history()$h2h
+    validate(need(!is.null(h), "No completed games in league history yet."))
+    h
+  }, rownames = TRUE, striped = TRUE)
 }
 
 shinyApp(ui, server)
