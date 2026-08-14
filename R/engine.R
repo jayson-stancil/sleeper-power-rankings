@@ -76,7 +76,7 @@ build_team_table <- function(users, rosters, owner_map = NULL) {
                   stringsAsFactors = FALSE)
   out <- merge(r, u, by = "user_id", all.x = TRUE)
   out[order(out$roster_id),
-      c("roster_id", "user_id", "owner", "team_name", "avatar_url")]
+      c("roster_id", "user_id", "owner", "display", "team_name", "avatar_url")]
 }
 
 # --------------------------- MATCHUPS ----------------------------------------
@@ -197,45 +197,101 @@ compute_roster_scores <- function(league_id, is_dynasty = FALSE, ppr = 1) {
             stringsAsFactors = FALSE)[order(rosters$roster_id), ]
 }
 
-# --------------------------- ROSTER DETAILS -----------------------------------
-# Full roster listing per team: player name/position/NFL team (from Sleeper's
-# players/nfl reference) and FantasyCalc value (NA for unpriced players, e.g.
-# K/DEF). players_ref should be fetched once per session via
-# fetch_sleeper_players() and reused -- it's a ~5MB reference file.
+# --------------------------- TRANSACTIONS --------------------------------------
+# Season transaction log: adds/drops (waiver or free agency) and trades, one
+# row per team side per transaction so the whole log is a single flat table
+# (sortable/filterable client-side in the Shiny app via DT). No FantasyCalc
+# dependency -- just Sleeper's own transaction records and player names.
 
 fetch_sleeper_players <- function() sleeper("players/nfl")
 
-# rosters: league/<id>/rosters response. teams: build_team_table() output
-# (for roster_id -> owner). players_ref: fetch_sleeper_players() output.
-build_roster_details <- function(rosters, teams, players_ref,
-                                 is_dynasty = FALSE, ppr = 1) {
-  fc <- fetch_fantasycalc_values(is_dynasty = is_dynasty, num_qbs = 1,
-                                 num_teams = nrow(rosters), ppr = ppr)
-  val_by_id <- if (!is.null(fc)) setNames(fc$value, fc$sleeper_id) else NULL
+# league_id  Sleeper league ID
+# weeks      Integer vector of rounds to check, e.g. 0:18 (0 covers preseason
+#            waiver activity; extra out-of-range rounds are silently skipped)
+# players_ref  fetch_sleeper_players() output, for player_id -> name
+# teams        build_team_table() output, for roster_id -> owner
+fetch_league_transactions <- function(league_id, weeks, players_ref, teams) {
+  id_to_owner <- setNames(teams$owner, teams$roster_id)
+  pname <- function(pid) {
+    p <- players_ref[[as.character(pid)]]
+    if (!is.null(p$full_name) && nzchar(p$full_name)) p$full_name
+    else as.character(pid)
+  }
 
   rows <- list()
-  for (i in seq_len(nrow(rosters))) {
-    rid  <- rosters$roster_id[i]
-    pids <- rosters$players[[i]]
-    if (is.null(pids) || !length(pids)) next
-    for (pid in pids) {
-      p    <- players_ref[[as.character(pid)]]
-      name <- if (!is.null(p$full_name) && nzchar(p$full_name)) p$full_name
-              else as.character(pid)
-      rows[[length(rows) + 1]] <- data.frame(
-        roster_id = rid,
-        player_id = as.character(pid),
-        Player    = name,
-        Position  = if (!is.null(p$position)) p$position else NA_character_,
-        NFL       = if (!is.null(p$team)) p$team else "FA",
-        Value     = if (!is.null(val_by_id))
-                      unname(val_by_id[as.character(pid)]) else NA_real_,
-        stringsAsFactors = FALSE)
+  for (wk in weeks) {
+    tx <- tryCatch(sleeper(paste0("league/", league_id, "/transactions/", wk)),
+                   error = function(e) NULL)
+    if (is.null(tx) || !is.data.frame(tx) || !nrow(tx)) next
+
+    for (i in seq_len(nrow(tx))) {
+      t <- tx[i, ]
+      if (!identical(t$status, "complete")) next
+      type  <- if (identical(t$type, "trade")) "Trade" else "Add/Drop"
+      adds  <- t$adds[[1]]
+      drops <- t$drops[[1]]
+      rids  <- unique(c(if (!is.null(adds))  unname(unlist(adds))  else NULL,
+                        if (!is.null(drops)) unname(unlist(drops)) else NULL,
+                        unlist(t$roster_ids)))
+      if (!length(rids)) next
+
+      for (rid in rids) {
+        added_p   <- if (!is.null(adds))  names(adds)[unlist(adds)   == rid]
+                     else character(0)
+        dropped_p <- if (!is.null(drops)) names(drops)[unlist(drops) == rid]
+                     else character(0)
+        if (!length(added_p) && !length(dropped_p)) next
+        rows[[length(rows) + 1]] <- data.frame(
+          Date = format(as.POSIXct(t$created / 1000, origin = "1970-01-01",
+                                   tz = "America/New_York"), "%Y-%m-%d"),
+          Week    = wk,
+          Type    = type,
+          Team    = unname(id_to_owner[as.character(rid)]),
+          Added   = paste(vapply(added_p, pname, character(1)), collapse = ", "),
+          Dropped = paste(vapply(dropped_p, pname, character(1)), collapse = ", "),
+          stringsAsFactors = FALSE)
+      }
     }
   }
+
+  if (!length(rows)) {
+    return(data.frame(Date = character(0), Week = integer(0),
+                      Type = character(0), Team = character(0),
+                      Added = character(0), Dropped = character(0),
+                      stringsAsFactors = FALSE))
+  }
   out <- do.call(rbind, rows)
-  out$Owner <- teams$owner[match(out$roster_id, teams$roster_id)]
-  out[order(out$roster_id, -out$Value, out$Player), ]
+  out[order(out$Date, decreasing = TRUE), ]
+}
+
+# --------------------------- POINTS FOR ----------------------------------------
+# Team x week scoring matrix plus season Total/Avg/High/Low/Dev (sample sd),
+# mirroring create_points_against_table()'s shape. teams: build_team_table()
+# output, for Teams (team_name) and Name (Sleeper display_name) labels.
+
+create_points_for_table <- function(games, teams) {
+  ids   <- sort(unique(c(games$team, games$opponent)))
+  weeks <- sort(unique(games$week))
+  pf <- matrix(NA_real_, length(ids), length(weeks),
+              dimnames = list(ids, paste0("WK", weeks)))
+  for (i in seq_len(nrow(games))) {
+    wk <- paste0("WK", games$week[i])
+    pf[as.character(games$team[i]),     wk] <- games$team_points[i]
+    pf[as.character(games$opponent[i]), wk] <- games$opponent_points[i]
+  }
+  wk_cols <- colnames(pf)
+  out <- data.frame(roster_id = as.integer(rownames(pf)), pf,
+                    check.names = FALSE, row.names = NULL)
+  wm <- as.matrix(out[, wk_cols, drop = FALSE])
+  out$TOTAL <- rowSums(wm, na.rm = TRUE)
+  out$AVG   <- rowMeans(wm, na.rm = TRUE)
+  out$HIGH  <- apply(wm, 1, max, na.rm = TRUE)
+  out$LOW   <- apply(wm, 1, min, na.rm = TRUE)
+  out$DEV   <- apply(wm, 1, sd, na.rm = TRUE)
+
+  out$Teams <- teams$team_name[match(out$roster_id, teams$roster_id)]
+  out$Name  <- teams$display[match(out$roster_id, teams$roster_id)]
+  out[, c("Teams", "Name", wk_cols, "TOTAL", "AVG", "HIGH", "LOW", "DEV")]
 }
 
 # --------------------------- OVERALL WINS (ALL-PLAY) --------------------------
