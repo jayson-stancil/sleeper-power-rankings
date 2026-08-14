@@ -81,14 +81,14 @@ ui <- fluidPage(
                                        "Points Against", "Overall Wins"),
                             selected = "Summary"),
                  conditionalPanel(
-                   "input.stats_view == `Summary`",
+                   "input.stats_view == 'Summary'",
                    h4("Season Summary"),
                    helpText("OVW = Overall Wins: teams beaten that week if",
                             "every team played every team (all-play record)."),
                    tableOutput("summary_table")
                  ),
                  conditionalPanel(
-                   "input.stats_view == `Rating Trajectory`",
+                   "input.stats_view == 'Rating Trajectory'",
                    helpText("Highlighted owners are drawn in color; the rest",
                             "of the league shows as gray context lines."),
                    selectizeInput("traj_owners", "Highlight:", choices = NULL,
@@ -97,16 +97,22 @@ ui <- fluidPage(
                    plotOutput("trajectory", height = "550px")
                  ),
                  conditionalPanel(
-                   "input.stats_view == `Points Against`",
+                   "input.stats_view == 'Points Against'",
                    tableOutput("pa_table")
                  ),
                  conditionalPanel(
-                   "input.stats_view == `Overall Wins`",
+                   "input.stats_view == 'Overall Wins'",
                    helpText("Teams beaten each week if every team played",
                             "every team (all-play record), not just the",
                             "actual opponent."),
                    tableOutput("ow_table")
                  )
+        ),
+        tabPanel("Rosters",
+                 selectInput("roster_owner", "Team:", choices = NULL),
+                 helpText("Player values are FantasyCalc redraft prices",
+                          "(NA for unpriced players, e.g. K/DEF)."),
+                 tableOutput("roster_table")
         ),
         tabPanel("League History",
                  h4("Champions"),
@@ -178,6 +184,33 @@ server <- function(input, output, session) {
                             ppr = if (is.null(c_$ppr)) 1 else c_$ppr),
       error = function(e) NULL)
   })
+
+  # ---- Rosters ------------------------------------------------------------
+
+  # Sleeper's full players/nfl reference (~5MB); fetched once per session.
+  players_ref <- reactive(fetch_sleeper_players())
+
+  roster_details <- reactive({
+    c_ <- cfg()
+    rosters <- sleeper(paste0("league/", c_$league_id, "/rosters"))
+    build_roster_details(rosters, identity(), players_ref(),
+                         is_dynasty = isTRUE(c_$is_dynasty),
+                         ppr = if (is.null(c_$ppr)) 1 else c_$ppr)
+  })
+
+  observeEvent(identity(), {
+    owners <- sort(unique(identity()$owner))
+    updateSelectInput(session, "roster_owner", choices = owners,
+                      selected = owners[1])
+  })
+
+  output$roster_table <- renderTable({
+    rd <- roster_details()
+    me <- req(input$roster_owner)
+    sub <- rd[rd$Owner == me, c("Player", "Position", "NFL", "Value")]
+    validate(need(nrow(sub) > 0, "No roster data for this team."))
+    sub[order(-sub$Value, sub$Player), ]
+  }, striped = TRUE, digits = 0, na = "—")
 
   # Assembled table for the selected week
   tbl <- reactive({
@@ -285,7 +318,7 @@ server <- function(input, output, session) {
       transform_games_df(g, w)))
     pf <- aggregate(Points ~ ID, long, mean)
     pf$Owner <- id_to_owner[as.character(pf$ID)]
-    out$`AVG PF` <- round(pf$Points[match(out$Team, pf$Owner)], 1)
+    out$`AVG PF` <- round(pf$Points[match(out$Team, pf$Owner)], 2)
     out$`AVG PF RANK` <- as.integer(rank(-out$`AVG PF`, ties.method = "min"))
 
     out[order(out$`WINS RANK`), ]
@@ -293,7 +326,7 @@ server <- function(input, output, session) {
 
   output$summary_table <- renderTable({
     summary_data()
-  }, striped = TRUE, digits = 1)
+  }, striped = TRUE, digits = 2)
 
   # ---- League Stats: Rating Trajectory -----------------------------------
 
@@ -354,7 +387,7 @@ server <- function(input, output, session) {
     pa <- create_points_against_table(g)
     pa$Team <- setNames(ids$owner, ids$roster_id)[as.character(pa$Team)]
     pa[order(pa$total_pa), ]
-  }, digits = 1)
+  }, digits = 2)
 
   # ---- League Stats: Overall Wins ----------------------------------------
 
