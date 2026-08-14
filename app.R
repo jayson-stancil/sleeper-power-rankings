@@ -28,9 +28,10 @@ raw_url <- function(path) {
 }
 
 read_repo_csv <- function(path) {
-  out <- tryCatch(read.csv(raw_url(path), stringsAsFactors = FALSE,
-                           check.names = FALSE),
-                  error = function(e) NULL)
+  out <- suppressWarnings(
+    tryCatch(read.csv(raw_url(path), stringsAsFactors = FALSE,
+                      check.names = FALSE),
+             error = function(e) NULL))
   if (is.null(out) && file.exists(path)) {
     out <- read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
   }
@@ -40,11 +41,11 @@ read_repo_csv <- function(path) {
 # List weekly rankings files: GitHub contents API (fresh), local fallback
 list_weekly_files <- function(cfg) {
   dir_path <- file.path(cfg$data_dir, "Power Rankings", "Weeks 1-14")
-  api <- tryCatch(
+  api <- suppressWarnings(tryCatch(
     jsonlite::fromJSON(paste0("https://api.github.com/repos/", GH_USER, "/",
                               GH_REPO, "/contents/",
                               utils::URLencode(dir_path))),
-    error = function(e) NULL)
+    error = function(e) NULL))
   files <- if (!is.null(api) && !is.null(api$name)) api$name
            else if (dir.exists(dir_path)) list.files(dir_path)
            else character(0)
@@ -103,7 +104,12 @@ server <- function(input, output, session) {
 
   observeEvent(weekly_files(), {
     wks <- sort(week_from_filename(weekly_files()), decreasing = TRUE)
-    updateSelectInput(session, "week", choices = wks, selected = max(wks))
+    if (length(wks)) {
+      updateSelectInput(session, "week", choices = wks, selected = max(wks))
+    } else {
+      updateSelectInput(session, "week",
+                        choices = c("No rankings yet - season not started" = ""))
+    }
   }, ignoreNULL = FALSE)
 
   games <- reactive({
