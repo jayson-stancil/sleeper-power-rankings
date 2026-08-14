@@ -159,6 +159,81 @@ create_points_against_table <- function(games) {
   out
 }
 
+# --------------------------- FANTASYCALC ROSTER SCORES -----------------------
+# FantasyCalc (api.fantasycalc.com) prices skill-position players (QB/RB/WR/TE)
+# from real trade data; it does not price K/DEF, which contribute 0. Values
+# are keyed by Sleeper player_id, so no ID mapping is required.
+
+fetch_fantasycalc_values <- function(is_dynasty = FALSE, num_qbs = 1,
+                                     num_teams = 12, ppr = 1) {
+  url <- paste0("https://api.fantasycalc.com/values/current?isDynasty=",
+               tolower(as.character(is_dynasty)), "&numQbs=", num_qbs,
+               "&numTeams=", num_teams, "&ppr=", ppr)
+  d <- tryCatch(jsonlite::fromJSON(url), error = function(e) NULL)
+  if (is.null(d) || !is.data.frame(d) || !("player" %in% names(d))) {
+    warning("FantasyCalc fetch failed or returned unexpected shape: ", url)
+    return(NULL)
+  }
+  data.frame(sleeper_id = as.character(d$player$sleeperId),
+            value = d$value, stringsAsFactors = FALSE)
+}
+
+# Sums FantasyCalc player value per Sleeper roster. Returns a data.frame
+# (roster_id, total_value) ordered by roster_id, suitable for passing (after
+# extracting $total_value) as run_power_rankings()'s roster_scores argument.
+# is_dynasty/ppr should match the league's format; ppr = 1 for full PPR.
+compute_roster_scores <- function(league_id, is_dynasty = FALSE, ppr = 1) {
+  rosters <- sleeper(paste0("league/", league_id, "/rosters"))
+  fc <- fetch_fantasycalc_values(is_dynasty = is_dynasty, num_qbs = 1,
+                                 num_teams = nrow(rosters), ppr = ppr)
+  if (is.null(fc)) return(NULL)
+  val_by_id <- setNames(fc$value, fc$sleeper_id)
+  totals <- vapply(rosters$players, function(pids) {
+    if (is.null(pids) || !length(pids)) return(0)
+    v <- val_by_id[as.character(pids)]
+    sum(v, na.rm = TRUE)
+  }, numeric(1))
+  data.frame(roster_id = rosters$roster_id, total_value = totals,
+            stringsAsFactors = FALSE)[order(rosters$roster_id), ]
+}
+
+# --------------------------- OVERALL WINS (ALL-PLAY) --------------------------
+# For each week, compares every team's score to every OTHER team's score that
+# week (not just their actual opponent) and counts how many they'd have beaten
+# (ties count as 0.5). Returns one row per team per week; summed across weeks
+# for a season total. Independent of actual matchup pairing/luck.
+
+compute_overall_wins <- function(games) {
+  weeks <- sort(unique(games$week))
+  long_all <- do.call(rbind, lapply(weeks, function(w) transform_games_df(games, w)))
+  long_all$overall_wins <- unlist(lapply(weeks, function(w) {
+    wk <- long_all[long_all$Week == w, , drop = FALSE]
+    vapply(seq_len(nrow(wk)), function(i) {
+      others <- wk$Points[-i]
+      sum(wk$Points[i] > others) + 0.5 * sum(wk$Points[i] == others)
+    }, numeric(1))
+  }))
+  long_all
+}
+
+# Wide table (one row per team, one column per week) of overall_wins, plus a
+# Total column. Mirrors create_points_against_table's shape/convention.
+build_overall_wins_table <- function(games) {
+  ow    <- compute_overall_wins(games)
+  ids   <- sort(unique(ow$ID))
+  weeks <- sort(unique(ow$Week))
+  m <- matrix(NA_real_, length(ids), length(weeks),
+             dimnames = list(ids, as.character(weeks)))
+  for (i in seq_len(nrow(ow))) {
+    m[as.character(ow$ID[i]), as.character(ow$Week[i])] <- ow$overall_wins[i]
+  }
+  out <- data.frame(Team = rownames(m), m, check.names = FALSE,
+                    row.names = NULL)
+  wm <- as.matrix(out[, as.character(weeks), drop = FALSE])
+  out$Total <- rowSums(wm, na.rm = TRUE)
+  out
+}
+
 # --------------------------- GRAPHIC -----------------------------------------
 
 build_graphic <- function(tbl, league_name, next_week, latest_week) {
