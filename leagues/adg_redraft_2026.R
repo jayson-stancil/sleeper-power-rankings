@@ -25,12 +25,13 @@ list(
                                       "851975252232732672", "940792224906813440",
                                       "983872106012184576", "940811524497707008",
                                       "983524250025799680", "983812076013502464",
-                                      "1124108971461148672", "1135467195745964032"),
+                                      "1124108971461148672", "1135467195745964032",
+                "972712009852665856", "980561693363228672"),
           owner   = c("KING COMMISH", "Gus Buck", "Kellen McHugh", "Elijah Sartin",
                                       "Ethan Thimme", "Neal Adams", "Jack Huff", "Tommy Pack",
                                       "Gabe Lewitt", "Colin Kelly", "Will Allemang", "Ethan Purdy",
                                       "Bryan Birk", "Connor Helgeson", "Jon Michael Gaudin",
-                                      "Caleb Garcia"),
+                                      "Caleb Garcia", "Brady Hopkins", "Logan Smith"),
           stringsAsFactors = FALSE
         )
   )
