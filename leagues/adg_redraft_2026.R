@@ -10,8 +10,19 @@ list(
     season_label = "2026-2027",
     data_dir     = "data/adg_redraft",
 
-    # Preseason scores by roster_id (higher = stronger); fill in after the
-    # 2026 draft, e.g. reversed Borda ranks. NULL -> all teams start at 1500.
+    # Preseason/roster strength scoring, used for (a) Glicko-2 initial ratings
+    # and (b) the ROST SCORE column in League Stats > Summary.
+    #   "fantasycalc" - computed live each run: sums FantasyCalc player values
+    #                   (see is_dynasty/ppr below) per Sleeper roster, then
+    #                   ranks teams 1-16 (1 = strongest roster).
+    #   "manual"      - uses the roster_scores vector below instead.
+    #   NULL          - disabled; all teams start at 1500, ROST SCORE hidden.
+    roster_score_source = "fantasycalc",
+    is_dynasty = FALSE,  # FALSE = redraft player values, TRUE = dynasty
+    ppr        = 1,      # matches this league's full-PPR scoring
+
+    # Manual override, only used when roster_score_source == "manual".
+    # By roster_id (higher = stronger); e.g. reversed Borda ranks.
     # 2025 values for reference: c(16,5,8,7,13,12,9,4,15,11,1,10,2,3,14,6)
     roster_scores = NULL,
 
