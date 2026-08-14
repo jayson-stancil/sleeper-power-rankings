@@ -128,6 +128,15 @@ ui <- fluidPage(
                           "by Type or Team."),
                  DT::dataTableOutput("transactions_table")
         ),
+        tabPanel("Simulated Seasons",
+                 helpText("Monte Carlo season simulations (ffsimulator):",
+                          "what a season with these rosters could look like",
+                          "if replayed hundreds of times. Computed weekly",
+                          "alongside the rankings, not live in this app."),
+                 tableOutput("sim_summary_table"),
+                 h4("Distribution of Simulated Final Standings"),
+                 plotOutput("sim_rank_plot", height = "500px")
+        ),
         tabPanel("League History",
                  h4("Champions"),
                  tableOutput("champions"),
@@ -231,7 +240,7 @@ server <- function(input, output, session) {
                             Value = sum(sub$Value, na.rm = TRUE),
                             stringsAsFactors = FALSE)
     rbind(sub, total_row)
-  }, striped = TRUE, digits = 0, na = "—")
+  }, striped = TRUE, digits = 0, na = "â")
 
   transactions_data <- reactive({
     req(input$main_tabs == "Transactions")
@@ -249,6 +258,48 @@ server <- function(input, output, session) {
     d
   }, filter = "top", rownames = FALSE,
      options = list(pageLength = 25, order = list(list(0, "desc"))))
+
+  # ---- Simulated Seasons ---------------------------------------------------
+  # Reads the two small CSVs written weekly by R/simulate.R (ffsimulator).
+  # This tab never calls ffsimulator/ffscrapr itself -- only reads their
+  # pre-computed output, so the Shiny app has no extra package dependencies.
+
+  sim_data <- reactive({
+    req(input$main_tabs == "Simulated Seasons")
+    c_ <- cfg()
+    list(
+      summary = read_repo_csv(file.path(c_$data_dir, "Simulation",
+                                        "summary_simulation.csv")),
+      season  = read_repo_csv(file.path(c_$data_dir, "Simulation",
+                                        "summary_season.csv"))
+    )
+  })
+
+  output$sim_summary_table <- renderTable({
+    d <- sim_data()$summary
+    validate(need(!is.null(d), paste("No simulation data yet -- runs",
+                                     "weekly alongside the rankings.")))
+    out <- d[, c("Owner", "h2h_winpct", "allplay_winpct", "points_for",
+                "points_against", "made_playoffs", "last_place")]
+    names(out) <- c("Owner", "H2H Win%", "All-Play Win%", "Avg PF", "Avg PA",
+                    "Playoff Odds", "Last Place Odds")
+    out[order(-out$`Playoff Odds`), ]
+  }, striped = TRUE, digits = 3)
+
+  output$sim_rank_plot <- renderPlot({
+    d <- sim_data()$season
+    validate(need(!is.null(d), paste("No simulation data yet -- runs",
+                                     "weekly alongside the rankings.")))
+    ord <- aggregate(sim_rank ~ Owner, d, mean)
+    ord <- ord$Owner[order(ord$sim_rank)]
+    d$Owner <- factor(d$Owner, levels = rev(ord))
+
+    ggplot(d, aes(x = sim_rank, y = Owner)) +
+      geom_boxplot(fill = "#4C72B0", alpha = 0.6, outlier.alpha = 0.3) +
+      scale_x_continuous(breaks = seq_len(length(unique(d$Owner)))) +
+      labs(x = "Simulated final standing (1 = best)", y = NULL) +
+      theme_minimal(base_size = 13)
+  })
 
   # Assembled table for the selected week
   tbl <- reactive({
@@ -295,10 +346,10 @@ server <- function(input, output, session) {
     cur <- cur[order(cur$rank), ]
     cur$record <- paste0(cur$Win, "-", cur$Loss,
                          ifelse(cur$Draw > 0, paste0("-", cur$Draw), ""))
-    cur$move <- ifelse(is.na(cur$rank_change) | cur$rank_change == 0, "—",
+    cur$move <- ifelse(is.na(cur$rank_change) | cur$rank_change == 0, "â",
                        ifelse(cur$rank_change > 0,
-                              paste0("▲ ", cur$rank_change),
-                              paste0("▼ ", abs(cur$rank_change))))
+                              paste0("â² ", cur$rank_change),
+                              paste0("â¼ ", abs(cur$rank_change))))
     cur$avatar_url[is.na(cur$avatar_url)] <-
       "https://sleepercdn.com/images/v2/icons/league/league_avatar_mint.png"
     cur$owner <- cur$Player
