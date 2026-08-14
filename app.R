@@ -293,7 +293,7 @@ server <- function(input, output, session) {
 
   output$summary_table <- renderTable({
     summary_data()
-  }, striped = TRUE, digits = NA)
+  }, striped = TRUE, digits = 1)
 
   # ---- League Stats: Rating Trajectory -----------------------------------
 
