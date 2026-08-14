@@ -115,6 +115,13 @@ ui <- fluidPage(
                    tableOutput("ow_table")
                  )
         ),
+        tabPanel("Rosters",
+                 selectInput("roster_owner", "Team:", choices = NULL),
+                 helpText("Player values are FantasyCalc redraft prices",
+                          "(NA for unpriced players, e.g. K/DEF). TOTAL is",
+                          "the team's summed roster value."),
+                 tableOutput("roster_table")
+        ),
         tabPanel("Transactions",
                  helpText("All season adds/drops and trades. Click a column",
                           "header to sort; use the filter boxes to narrow",
@@ -192,12 +199,39 @@ server <- function(input, output, session) {
       error = function(e) NULL)
   })
 
-  # ---- Transactions ---------------------------------------------------------
-  # Lazy: nothing here fetches until the Transactions tab is actually opened.
+  # ---- Rosters & Transactions -----------------------------------------------
+  # Lazy: neither fetches until its tab is actually opened.
 
   # Sleeper's full players/nfl reference (~5MB); fetched once per session,
   # the first time it's needed.
   players_ref <- reactive(fetch_sleeper_players())
+
+  observeEvent(identity(), {
+    owners <- sort(unique(identity()$owner))
+    updateSelectInput(session, "roster_owner", choices = owners,
+                      selected = owners[1])
+  })
+
+  roster_details <- reactive({
+    req(input$main_tabs == "Rosters")
+    c_ <- cfg()
+    rosters <- sleeper(paste0("league/", c_$league_id, "/rosters"))
+    build_roster_details(rosters, identity(), players_ref(),
+                         is_dynasty = isTRUE(c_$is_dynasty),
+                         ppr = if (is.null(c_$ppr)) 1 else c_$ppr)
+  })
+
+  output$roster_table <- renderTable({
+    rd <- roster_details()
+    me <- req(input$roster_owner)
+    sub <- rd[rd$Owner == me, c("Player", "Position", "NFL", "Value")]
+    validate(need(nrow(sub) > 0, "No roster data for this team."))
+    sub <- sub[order(-sub$Value, sub$Player), ]
+    total_row <- data.frame(Player = "TOTAL", Position = "", NFL = "",
+                            Value = sum(sub$Value, na.rm = TRUE),
+                            stringsAsFactors = FALSE)
+    rbind(sub, total_row)
+  }, striped = TRUE, digits = 0, na = "—")
 
   transactions_data <- reactive({
     req(input$main_tabs == "Transactions")
