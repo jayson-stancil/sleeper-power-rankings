@@ -1,8 +1,9 @@
 # =============================================================================
 # Sleeper Power Rankings -- Shiny app
 # Presentation layer: reads weekly rankings CSVs committed to GitHub by the
-# scheduled Action, pulls team names/avatars live from the Sleeper API, and
-# renders the rankings table plus rating trajectories.
+# scheduled Action, pulls team names/avatars/roster values live from the
+# Sleeper and FantasyCalc APIs, and renders rankings, league stats, and
+# league history.
 # =============================================================================
 
 library(shiny)
@@ -14,7 +15,7 @@ GH_USER   <- "jayson-stancil"
 GH_REPO   <- "sleeper-power-rankings"
 GH_BRANCH <- "main"
 
-source("R/engine.R")   # sleeper(), build_team_table(), PA helpers
+source("R/engine.R")   # sleeper(), build_team_table(), stats helpers
 
 # ---- League configs ---------------------------------------------------------
 league_files <- list.files("leagues", pattern = "\\.R$", full.names = TRUE)
@@ -74,20 +75,45 @@ ui <- fluidPage(
       width = 9,
       tabsetPanel(
         tabPanel("Rankings", gt_output("rank_table")),
-        tabPanel("Rating trajectory",
-                 helpText("Highlighted owners are drawn in color; the rest of",
-                          "the league shows as gray context lines."),
-                 selectizeInput("traj_owners", "Highlight:", choices = NULL,
-                                multiple = TRUE,
-                                options = list(placeholder = "Select owners...")),
-                 plotOutput("trajectory", height = "550px")),
-        tabPanel("Points against", tableOutput("pa_table")),
-        tabPanel("League history",
+        tabPanel("League Stats",
+                 selectInput("stats_view", "View:",
+                            choices = c("Summary", "Rating Trajectory",
+                                       "Points Against", "Overall Wins"),
+                            selected = "Summary"),
+                 conditionalPanel(
+                   "input.stats_view == `Summary`",
+                   h4("Season Summary"),
+                   helpText("OVW = Overall Wins: teams beaten that week if",
+                            "every team played every team (all-play record)."),
+                   tableOutput("summary_table")
+                 ),
+                 conditionalPanel(
+                   "input.stats_view == `Rating Trajectory`",
+                   helpText("Highlighted owners are drawn in color; the rest",
+                            "of the league shows as gray context lines."),
+                   selectizeInput("traj_owners", "Highlight:", choices = NULL,
+                                  multiple = TRUE,
+                                  options = list(placeholder = "Select owners...")),
+                   plotOutput("trajectory", height = "550px")
+                 ),
+                 conditionalPanel(
+                   "input.stats_view == `Points Against`",
+                   tableOutput("pa_table")
+                 ),
+                 conditionalPanel(
+                   "input.stats_view == `Overall Wins`",
+                   helpText("Teams beaten each week if every team played",
+                            "every team (all-play record), not just the",
+                            "actual opponent."),
+                   tableOutput("ow_table")
+                 )
+        ),
+        tabPanel("League History",
                  h4("Champions"),
                  tableOutput("champions"),
-                 h4("All-time regular-season records"),
+                 h4("All-Time Regular-Season Records"),
                  tableOutput("alltime"),
-                 h4("Head-to-head"),
+                 h4("Head-to-Head"),
                  helpText("Head-to-head covers Sleeper seasons (2023-present);",
                           "game-level data is unavailable for earlier years."),
                  selectInput("h2h_owner", "Show record for:", choices = NULL),
@@ -140,6 +166,18 @@ server <- function(input, output, session) {
                             paste0(c_$season_label, " ", c_$league_tag,
                                    " Week ", wk, " Power Rankings.csv")))
   }
+
+  # Live FantasyCalc roster scores for the current league (NULL if disabled
+  # or unreachable). Cached per session; used by both the Glicko-2 seed at
+  # pipeline time (see run_all.R) and the Summary tab's ROST SCORE column.
+  roster_scores_live <- reactive({
+    c_ <- cfg()
+    if (!identical(c_$roster_score_source, "fantasycalc")) return(NULL)
+    tryCatch(
+      compute_roster_scores(c_$league_id, is_dynasty = isTRUE(c_$is_dynasty),
+                            ppr = if (is.null(c_$ppr)) 1 else c_$ppr),
+      error = function(e) NULL)
+  })
 
   # Assembled table for the selected week
   tbl <- reactive({
@@ -201,6 +239,64 @@ server <- function(input, output, session) {
     build_graphic(tbl(), league_meta()$name, wk, wk - 1)
   })
 
+  # ---- League Stats: Summary --------------------------------------------
+
+  summary_data <- reactive({
+    c_ <- cfg()
+    wks <- sort(week_from_filename(weekly_files()), decreasing = TRUE)
+    validate(need(length(wks) > 0, "No rankings yet - season not started."))
+    latest <- weekly_csv(wks[1])
+    validate(need(!is.null(latest), "No rankings file for the latest week."))
+
+    g <- games()
+    validate(need(!is.null(g), "No matchup data yet."))
+
+    ids <- identity()
+    id_to_owner <- setNames(ids$owner, ids$roster_id)
+
+    out <- data.frame(Team = latest$Player, WINS = as.integer(latest$Win),
+                      stringsAsFactors = FALSE)
+    out$`WINS RANK` <- rank(-out$WINS, ties.method = "min")
+
+    # ROST SCORE: rank 1-16 by summed roster value (live FantasyCalc, or the
+    # manual roster_scores vector as a fallback; NA if neither is available).
+    rs <- roster_scores_live()
+    if (!is.null(rs)) {
+      rs$Owner <- id_to_owner[as.character(rs$roster_id)]
+      out$`ROST SCORE` <- as.integer(
+        rank(-rs$total_value[match(out$Team, rs$Owner)], ties.method = "min"))
+    } else if (!is.null(c_$roster_scores)) {
+      rid <- ids$roster_id[match(out$Team, ids$owner)]
+      rs_vec <- c_$roster_scores[match(rid, sort(unique(ids$roster_id)))]
+      out$`ROST SCORE` <- as.integer(rank(-rs_vec, ties.method = "min"))
+    } else {
+      out$`ROST SCORE` <- NA_integer_
+    }
+
+    # Overall wins (all-play), summed across the season
+    ow <- compute_overall_wins(g)
+    ow_season <- aggregate(overall_wins ~ ID, ow, sum)
+    ow_season$Owner <- id_to_owner[as.character(ow_season$ID)]
+    out$OVW <- round(ow_season$overall_wins[match(out$Team, ow_season$Owner)], 1)
+    out$`OVW RANK` <- as.integer(rank(-out$OVW, ties.method = "min"))
+
+    # Average points for
+    long <- do.call(rbind, lapply(unique(g$week), function(w)
+      transform_games_df(g, w)))
+    pf <- aggregate(Points ~ ID, long, mean)
+    pf$Owner <- id_to_owner[as.character(pf$ID)]
+    out$`AVG PF` <- round(pf$Points[match(out$Team, pf$Owner)], 1)
+    out$`AVG PF RANK` <- as.integer(rank(-out$`AVG PF`, ties.method = "min"))
+
+    out[order(out$`WINS RANK`), ]
+  })
+
+  output$summary_table <- renderTable({
+    summary_data()
+  }, striped = TRUE, digits = NA)
+
+  # ---- League Stats: Rating Trajectory -----------------------------------
+
   traj_data <- reactive({
     wks <- sort(week_from_filename(weekly_files()))
     validate(need(length(wks) > 1, "Trajectories appear after two weeks."))
@@ -231,7 +327,7 @@ server <- function(input, output, session) {
       scale_x_continuous(breaks = wks,
                          expand = expansion(mult = c(0.02, 0.22))) +
       labs(x = "Rankings week", y = "Glicko-2 rating",
-           title = "Rating trajectory") +
+           title = "Rating Trajectory") +
       theme_minimal(base_size = 14) +
       theme(legend.position = "none")
 
@@ -250,6 +346,8 @@ server <- function(input, output, session) {
     p
   })
 
+  # ---- League Stats: Points Against --------------------------------------
+
   output$pa_table <- renderTable({
     g <- games(); req(g)
     ids <- identity()
@@ -258,8 +356,19 @@ server <- function(input, output, session) {
     pa[order(pa$total_pa), ]
   }, digits = 1)
 
-  # League history: walks previous_league_id through all seasons.
-  # Computed once per session (reactive caches the result).
+  # ---- League Stats: Overall Wins ----------------------------------------
+
+  output$ow_table <- renderTable({
+    g <- games(); req(g)
+    ids <- identity()
+    t <- build_overall_wins_table(g)
+    t$Team <- setNames(ids$owner, ids$roster_id)[as.character(t$Team)]
+    t[order(-t$Total), ]
+  }, digits = 1)
+
+  # ---- League History -----------------------------------------------------
+  # Walks previous_league_id through all seasons. Computed once per session
+  # (reactive caches the result).
   history <- reactive({
     withProgress(
       message = "Building league history from the Sleeper API...",
