@@ -422,7 +422,7 @@ server <- function(input, output, session) {
   output$pf_table <- renderTable({
     g <- games(); req(g)
     create_points_for_table(g, identity())
-  }, digits = 2)
+  }, digits = 2, na = "")
 
   # ---- League Stats: Points Against --------------------------------------
 
