@@ -264,6 +264,44 @@ fetch_league_transactions <- function(league_id, weeks, players_ref, teams) {
   out[order(out$Date, decreasing = TRUE), ]
 }
 
+# --------------------------- ROSTER DETAILS -------------------------------------
+# Full roster listing per team: player name/position/NFL team (from Sleeper's
+# players/nfl reference) and FantasyCalc value (NA for unpriced players, e.g.
+# K/DEF). players_ref: fetch_sleeper_players() output, reused across calls.
+
+# rosters: league/<id>/rosters response. teams: build_team_table() output
+# (for roster_id -> owner). players_ref: fetch_sleeper_players() output.
+build_roster_details <- function(rosters, teams, players_ref,
+                                 is_dynasty = FALSE, ppr = 1) {
+  fc <- fetch_fantasycalc_values(is_dynasty = is_dynasty, num_qbs = 1,
+                                 num_teams = nrow(rosters), ppr = ppr)
+  val_by_id <- if (!is.null(fc)) setNames(fc$value, fc$sleeper_id) else NULL
+
+  rows <- list()
+  for (i in seq_len(nrow(rosters))) {
+    rid  <- rosters$roster_id[i]
+    pids <- rosters$players[[i]]
+    if (is.null(pids) || !length(pids)) next
+    for (pid in pids) {
+      p    <- players_ref[[as.character(pid)]]
+      name <- if (!is.null(p$full_name) && nzchar(p$full_name)) p$full_name
+              else as.character(pid)
+      rows[[length(rows) + 1]] <- data.frame(
+        roster_id = rid,
+        player_id = as.character(pid),
+        Player    = name,
+        Position  = if (!is.null(p$position)) p$position else NA_character_,
+        NFL       = if (!is.null(p$team)) p$team else "FA",
+        Value     = if (!is.null(val_by_id))
+                      unname(val_by_id[as.character(pid)]) else NA_real_,
+        stringsAsFactors = FALSE)
+    }
+  }
+  out <- do.call(rbind, rows)
+  out$Owner <- teams$owner[match(out$roster_id, teams$roster_id)]
+  out[order(out$roster_id, -out$Value, out$Player), ]
+}
+
 # --------------------------- POINTS FOR ----------------------------------------
 # Team x week scoring matrix plus season Total/Avg/High/Low/Dev (sample sd),
 # mirroring create_points_against_table()'s shape. teams: build_team_table()
