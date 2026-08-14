@@ -21,6 +21,13 @@ list(
     is_dynasty = FALSE,  # FALSE = redraft player values, TRUE = dynasty
     ppr        = 1,      # matches this league's full-PPR scoring
 
+    # Season simulation (ffsimulator), feeds the "Simulated Seasons" tab.
+    # Runs only in the weekly GitHub Action (heavy deps, not in the Shiny
+    # app); set FALSE to skip it entirely for this league.
+    enable_simulation = TRUE,
+    sim_n_seasons = 250,  # more = smoother odds, slower CI run
+    sim_n_weeks   = 14,   # matches this league's regular-season length
+
     # Manual override, only used when roster_score_source == "manual".
     # By roster_id (higher = stronger); e.g. reversed Borda ranks.
     # 2025 values for reference: c(16,5,8,7,13,12,9,4,15,11,1,10,2,3,14,6)
