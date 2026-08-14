@@ -14,13 +14,31 @@ if (!length(league_files)) stop("No league configs found in leagues/.")
 for (f in league_files) {
   cfg <- source(f, local = new.env())$value
   message("\n=== ", cfg$league_tag, " (", cfg$season_label, ") ===")
+
+  # Resolve roster_scores per roster_score_source (see the league config for
+  # the source contract). Falls back to NULL (all teams start at 1500) if
+  # FantasyCalc is unreachable, rather than failing the whole run.
+  roster_scores <- cfg$roster_scores
+  if (identical(cfg$roster_score_source, "fantasycalc")) {
+    rs <- tryCatch(
+      compute_roster_scores(cfg$league_id, is_dynasty = isTRUE(cfg$is_dynasty),
+                            ppr = if (is.null(cfg$ppr)) 1 else cfg$ppr),
+      error = function(e) NULL)
+    if (is.null(rs)) {
+      message("FantasyCalc roster scores unavailable for ", cfg$league_tag,
+              "; falling back to flat 1500 initial ratings.")
+    } else {
+      roster_scores <- rs$total_value
+    }
+  }
+
   tryCatch(
     run_power_rankings(
       league_id     = cfg$league_id,
       league_tag    = cfg$league_tag,
       season_label  = cfg$season_label,
       base_dir      = cfg$data_dir,
-      roster_scores = cfg$roster_scores,
+      roster_scores = roster_scores,
       owner_map     = cfg$owner_map
     ),
     error = function(e) message("Skipped ", cfg$league_tag, ": ",
