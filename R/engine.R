@@ -256,7 +256,7 @@ build_graphic <- function(tbl, league_name, next_week, latest_week) {
     gt::fmt_number(columns = "Rating", decimals = 0) |>
     gt::fmt_number(columns = "rating_change", decimals = 1,
                    force_sign = TRUE) |>
-    gt::fmt_number(columns = c("avg_pf", "avg_pa"), decimals = 1) |>
+    gt::fmt_number(columns = c("avg_pf", "avg_pa"), decimals = 2) |>
     gt::sub_missing(columns = "rating_change", missing_text = "—") |>
     gt::data_color(columns = "Rating",
                    palette = c("#d73027", "#fee08b", "#1a9850")) |>
