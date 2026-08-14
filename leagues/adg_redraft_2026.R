@@ -32,6 +32,36 @@ list(
                                       "Gabe Lewitt", "Colin Kelly", "Will Allemang", "Ethan Purdy",
                                       "Bryan Birk", "Connor Helgeson", "Jon Michael Gaudin",
                                       "Caleb Garcia", "Brady Hopkins", "Logan Smith"),
-          stringsAsFactors = FALSE
-        )
+    stringsAsFactors = FALSE
+  ),
+
+  # Pre-Sleeper era (2020-2022): not available from the API. Merged into the
+  # League history tab by fetch_league_history(). Owner names must match the
+  # canonical names above ("Jayson Stancil" is recorded as KING COMMISH).
+  # Note: W/L below are as provided (wins sum 344, losses 349 - source data
+  # may include playoffs); edit here to correct.
+  history_seed = list(
+    champions = data.frame(
+      Season   = c("2022", "2021", "2020"),
+      Champion = c("Elijah Sartin", "Connor Helgeson", "KING COMMISH"),
+      stringsAsFactors = FALSE
+    ),
+    records = data.frame(
+      Owner = c("Tommy Pack", "KING COMMISH", "Johnny Hackett",
+                "Ethan Thimme", "Chris Gansen", "Will Lewis",
+                "Elijah Sartin", "Will Allemang", "Neal Adams",
+                "Bryan Birk", "Connor Helgeson", "Logan Smith",
+                "Jack Huff", "Axel Halvarson", "Kellen McHugh",
+                "Colin Kelly", "Brady Hopkins", "Ethan Purdy",
+                "Jacob Doherty", "Jordan Lacy", "Gus Buck",
+                "Hunter Henderson", "Mark Belvoix"),
+      Seasons = c(3, 3, 1, 2, 2, 2, 2, 1, 3, 3, 2, 1,
+                  1, 2, 2, 3, 1, 3, 1, 2, 2, 2, 1),
+      W = c(29, 36, 8, 18, 17, 13, 15, 6, 24, 26, 11, 8,
+            5, 12, 16, 22, 8, 23, 5, 18, 12, 9, 3),
+      L = c(11, 16, 4, 9, 10, 12, 12, 6, 28, 25, 16, 5,
+            8, 13, 24, 18, 5, 29, 7, 33, 28, 18, 12),
+      stringsAsFactors = FALSE
+    )
   )
+)
