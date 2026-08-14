@@ -7,6 +7,7 @@
 # =============================================================================
 
 source("R/engine.R")
+source("R/simulate.R")
 
 league_files <- list.files("leagues", pattern = "\\.R$", full.names = TRUE)
 if (!length(league_files)) stop("No league configs found in leagues/.")
@@ -44,5 +45,16 @@ for (f in league_files) {
     error = function(e) message("Skipped ", cfg$league_tag, ": ",
                                 conditionMessage(e))
   )
+
+  # ---- Season simulation (ffsimulator) -- opt-in, non-fatal on failure.
+  if (isTRUE(cfg$enable_simulation)) {
+    message("Running season simulation (ffsimulator) for ", cfg$league_tag,
+            "...")
+    tryCatch(
+      write_ff_simulation(cfg),
+      error = function(e) message("Simulation skipped for ", cfg$league_tag,
+                                  ": ", conditionMessage(e))
+    )
+  }
 }
 message("\nAll leagues processed.")
