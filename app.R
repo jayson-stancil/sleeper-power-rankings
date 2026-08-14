@@ -83,6 +83,8 @@ ui <- fluidPage(
                  h4("All-time regular-season records"),
                  tableOutput("alltime"),
                  h4("Head-to-head"),
+                 helpText("Head-to-head covers Sleeper seasons (2023-present);",
+                          "game-level data is unavailable for earlier years."),
                  selectInput("h2h_owner", "Show record for:", choices = NULL),
                  tableOutput("h2h"))
       )
@@ -226,7 +228,8 @@ server <- function(input, output, session) {
     withProgress(
       message = "Building league history from the Sleeper API...",
       value = 0.4,
-      fetch_league_history(cfg()$league_id, cfg()$owner_map)
+      fetch_league_history(cfg()$league_id, cfg()$owner_map,
+                           cfg()$history_seed)
     )
   })
 
