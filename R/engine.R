@@ -444,7 +444,8 @@ fetch_league_history <- function(league_id, owner_map = NULL) {
   }
 
   if (!length(long_all)) {
-    return(list(champions = champs_df, totals = NULL, h2h = NULL))
+    return(list(champions = champs_df, totals = NULL, h2h = NULL,
+                long = NULL))
   }
   long   <- do.call(rbind, long_all)
   owners <- sort(unique(long$owner))
@@ -481,5 +482,5 @@ fetch_league_history <- function(league_id, owner_map = NULL) {
   }
   h2h_df <- data.frame(h2h, check.names = FALSE)
 
-  list(champions = champs_df, totals = totals, h2h = h2h_df)
+  list(champions = champs_df, totals = totals, h2h = h2h_df, long = long)
 }
