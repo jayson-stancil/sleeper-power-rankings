@@ -75,6 +75,11 @@ ui <- fluidPage(
       tabsetPanel(
         tabPanel("Rankings", gt_output("rank_table")),
         tabPanel("Rating trajectory",
+                 helpText("Highlighted owners are drawn in color; the rest of",
+                          "the league shows as gray context lines."),
+                 selectizeInput("traj_owners", "Highlight:", choices = NULL,
+                                multiple = TRUE,
+                                options = list(placeholder = "Select owners...")),
                  plotOutput("trajectory", height = "550px")),
         tabPanel("Points against", tableOutput("pa_table")),
         tabPanel("League history",
@@ -196,22 +201,53 @@ server <- function(input, output, session) {
     build_graphic(tbl(), league_meta()$name, wk, wk - 1)
   })
 
-  output$trajectory <- renderPlot({
+  traj_data <- reactive({
     wks <- sort(week_from_filename(weekly_files()))
     validate(need(length(wks) > 1, "Trajectories appear after two weeks."))
-    hist_df <- do.call(rbind, lapply(wks, function(w) {
+    do.call(rbind, lapply(wks, function(w) {
       d <- weekly_csv(w)
       if (is.null(d)) return(NULL)
       data.frame(week = w, Player = d$Player, Rating = d$Rating)
     }))
-    ggplot(hist_df, aes(week, Rating, color = Player)) +
-      geom_line(linewidth = 0.9) + geom_point(size = 1.6) +
+  })
+
+  # Default highlight: current top 3 by rating
+  observeEvent(traj_data(), {
+    d <- traj_data()
+    latest <- d[d$week == max(d$week), ]
+    top3 <- latest$Player[order(-latest$Rating)][seq_len(min(3, nrow(latest)))]
+    updateSelectizeInput(session, "traj_owners",
+                         choices = sort(unique(d$Player)), selected = top3)
+  })
+
+  output$trajectory <- renderPlot({
+    d <- traj_data()
+    wks <- sort(unique(d$week))
+    sel <- input$traj_owners
+
+    p <- ggplot(d, aes(week, Rating, group = Player)) +
+      geom_line(color = "grey80", linewidth = 0.6) +
       geom_hline(yintercept = 1500, linetype = "dashed", color = "grey55") +
-      scale_x_continuous(breaks = wks) +
-      labs(x = "Rankings week", y = "Glicko-2 rating", color = NULL,
+      scale_x_continuous(breaks = wks,
+                         expand = expansion(mult = c(0.02, 0.22))) +
+      labs(x = "Rankings week", y = "Glicko-2 rating",
            title = "Rating trajectory") +
       theme_minimal(base_size = 14) +
-      theme(legend.position = "right")
+      theme(legend.position = "none")
+
+    if (length(sel)) {
+      dh <- d[d$Player %in% sel, , drop = FALSE]
+      lab <- dh[dh$week == max(wks), , drop = FALSE]
+      p <- p +
+        geom_line(data = dh, aes(color = Player), linewidth = 1.3) +
+        geom_point(data = dh, aes(color = Player), size = 2.2) +
+        geom_text(data = lab,
+                  aes(color = Player,
+                      label = paste0(Player, " (", round(Rating), ")")),
+                  hjust = -0.08, fontface = "bold", size = 4.2,
+                  show.legend = FALSE)
+    }
+    p
   })
 
   output$pa_table <- renderTable({
