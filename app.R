@@ -61,7 +61,10 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       width = 3,
-      selectInput("league", "League", choices = names(leagues)),
+      # League picker only when a repo carries more than one league config
+      if (length(leagues) > 1) {
+        selectInput("league", "League", choices = names(leagues))
+      },
       selectInput("week", "Rankings for week", choices = NULL),
       helpText("Ratings: Glicko-2, recomputed weekly from all completed",
                "games. Data updates automatically every Tuesday.")
@@ -81,7 +84,10 @@ ui <- fluidPage(
 # ---- Server -----------------------------------------------------------------
 server <- function(input, output, session) {
 
-  cfg <- reactive(leagues[[req(input$league)]])
+  cfg <- reactive({
+    if (length(leagues) == 1) leagues[[1]]
+    else leagues[[req(input$league)]]
+  })
 
   # Live Sleeper identity (team names, avatars) -- cached per session
   identity <- reactive({
