@@ -329,7 +329,22 @@ create_points_for_table <- function(games, teams) {
 
   out$Teams <- teams$team_name[match(out$roster_id, teams$roster_id)]
   out$Name  <- teams$display[match(out$roster_id, teams$roster_id)]
-  out[, c("Teams", "Name", wk_cols, "TOTAL", "AVG", "HIGH", "LOW", "DEV")]
+  out <- out[, c("Teams", "Name", wk_cols, "TOTAL", "AVG", "HIGH", "LOW", "DEV")]
+
+  # Footer row: league-wide median score for each week (medians across teams,
+  # not a team row -- Teams/Name label it, TOTAL/AVG/HIGH/LOW/DEV left blank).
+  med_row <- as.data.frame(as.list(apply(wm, 2, median, na.rm = TRUE)),
+                           check.names = FALSE)
+  med_row$Teams <- "MEDIAN"
+  med_row$Name  <- ""
+  med_row$TOTAL <- NA_real_
+  med_row$AVG   <- NA_real_
+  med_row$HIGH  <- NA_real_
+  med_row$LOW   <- NA_real_
+  med_row$DEV   <- NA_real_
+  med_row <- med_row[, names(out)]
+
+  rbind(out, med_row)
 }
 
 # --------------------------- OVERALL WINS (ALL-PLAY) --------------------------
