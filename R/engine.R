@@ -367,3 +367,119 @@ run_power_rankings <- function(league_id, league_tag, season_label, base_dir,
                  points_against = points_against_df,
                  weekly_file = weekly_file, png_file = png_file))
 }
+
+
+# --------------------------- LEAGUE HISTORY ----------------------------------
+# Walks previous_league_id back through every season. Aggregates by Sleeper
+# user_id so records follow owners across seasons and roster reshuffles.
+# Records and head-to-head use regular-season games only.
+
+fetch_league_chain <- function(league_id) {
+  chain <- list()
+  id <- league_id
+  while (!is.null(id) && nzchar(id) && !identical(id, "0")) {
+    lg <- tryCatch(sleeper(paste0("league/", id)), error = function(e) NULL)
+    if (is.null(lg)) break
+    chain[[length(chain) + 1]] <- lg
+    id <- lg$previous_league_id
+  }
+  chain
+}
+
+# Champion = winner of the playoff-bracket match that decides 1st place (p == 1)
+season_champion_roster <- function(lg) {
+  wb <- tryCatch(sleeper(paste0("league/", lg$league_id, "/winners_bracket")),
+                 error = function(e) NULL)
+  if (is.null(wb) || !is.data.frame(wb) || !all(c("p", "w") %in% names(wb))) {
+    return(NA_integer_)
+  }
+  fin <- wb[!is.na(wb$p) & wb$p == 1 & !is.na(wb$w), , drop = FALSE]
+  if (!nrow(fin)) return(NA_integer_)
+  as.integer(fin$w[1])
+}
+
+fetch_league_history <- function(league_id, owner_map = NULL) {
+  chain <- fetch_league_chain(league_id)
+  long_all <- list(); champ_rows <- list(); season_owners <- list()
+
+  for (lg in chain) {
+    users   <- tryCatch(sleeper(paste0("league/", lg$league_id, "/users")),
+                        error = function(e) NULL)
+    rosters <- tryCatch(sleeper(paste0("league/", lg$league_id, "/rosters")),
+                        error = function(e) NULL)
+    if (is.null(users) || is.null(rosters)) next
+    teams <- suppressWarnings(build_team_table(users, rosters, owner_map))
+    id_to_owner <- setNames(teams$owner, teams$roster_id)
+
+    champ <- season_champion_roster(lg)
+    if (!is.na(champ)) {
+      champ_rows[[length(champ_rows) + 1]] <- data.frame(
+        Season   = lg$season,
+        Champion = unname(id_to_owner[as.character(champ)]),
+        stringsAsFactors = FALSE)
+    }
+
+    reg_weeks <- seq_len(lg$settings$playoff_week_start - 1)
+    games <- tryCatch(build_matchups(lg$league_id, reg_weeks),
+                      error = function(e) NULL)
+    if (is.null(games)) next
+
+    season_owners[[length(season_owners) + 1]] <- data.frame(
+      season = lg$season, owner = unname(id_to_owner),
+      stringsAsFactors = FALSE)
+
+    long_all[[length(long_all) + 1]] <- data.frame(
+      owner    = unname(id_to_owner[as.character(c(games$team,
+                                                   games$opponent))]),
+      opponent = unname(id_to_owner[as.character(c(games$opponent,
+                                                   games$team))]),
+      win      = c(games$result, 1 - games$result),
+      stringsAsFactors = FALSE)
+  }
+
+  champs_df <- if (length(champ_rows)) do.call(rbind, champ_rows) else
+    data.frame(Season = character(0), Champion = character(0))
+  if (nrow(champs_df)) {
+    champs_df <- champs_df[order(champs_df$Season, decreasing = TRUE), ]
+  }
+
+  if (!length(long_all)) {
+    return(list(champions = champs_df, totals = NULL, h2h = NULL))
+  }
+  long   <- do.call(rbind, long_all)
+  owners <- sort(unique(long$owner))
+
+  # ---- All-time totals
+  so <- unique(do.call(rbind, season_owners))
+  totals <- data.frame(
+    Owner   = owners,
+    Seasons = as.integer(table(so$owner)[owners]),
+    W       = as.integer(tapply(long$win == 1,   long$owner, sum)[owners]),
+    L       = as.integer(tapply(long$win == 0,   long$owner, sum)[owners]),
+    T       = as.integer(tapply(long$win == 0.5, long$owner, sum)[owners]),
+    stringsAsFactors = FALSE, check.names = FALSE)
+  totals$`Win %` <- round((totals$W + 0.5 * totals$T) /
+                            pmax(totals$W + totals$L + totals$T, 1), 3)
+  titles <- table(champs_df$Champion)
+  totals$Titles <- as.integer(ifelse(is.na(titles[totals$Owner]), 0,
+                                     titles[totals$Owner]))
+  totals <- totals[order(-totals$`Win %`, -totals$W), ]
+  if (all(totals$T == 0)) totals$T <- NULL
+
+  # ---- Head-to-head matrix (W-L from the row owner's perspective)
+  h2h <- matrix("—", length(owners), length(owners),
+                dimnames = list(owners, owners))
+  for (i in owners) {
+    for (j in owners) {
+      if (i == j) next
+      sub <- long[long$owner == i & long$opponent == j, , drop = FALSE]
+      if (!nrow(sub)) next
+      ties <- sum(sub$win == 0.5)
+      h2h[i, j] <- paste0(sum(sub$win == 1), "-", sum(sub$win == 0),
+                          if (ties > 0) paste0("-", ties) else "")
+    }
+  }
+  h2h_df <- data.frame(h2h, check.names = FALSE)
+
+  list(champions = champs_df, totals = totals, h2h = h2h_df)
+}
