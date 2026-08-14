@@ -19,7 +19,7 @@ jobs:
           use-public-rspm: true
 
       - name: Install R packages
-        run: Rscript -e 'install.packages(c("jsonlite", "PlayerRatings", "gt", "webshot2"))'
+        run: Rscript -e 'install.packages(c("jsonlite", "PlayerRatings", "gt", "webshot2", "ffscrapr", "ffsimulator"))'
 
       - name: Run power rankings pipeline
         run: Rscript run_all.R
