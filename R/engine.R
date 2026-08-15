@@ -35,6 +35,24 @@ out
 
 sleeper <- function(path) fetch_json(paste0("https://api.sleeper.app/v1/", path))
 
+# Like sleeper(), but disables jsonlite's automatic data.frame simplification.
+# Needed for the transactions endpoint: adds/drops are per-transaction named
+# objects (player_id -> roster_id) that vary in their keys row to row, so
+# jsonlite's default simplifyDataFrame=TRUE flattens them into one sparse
+# wide data.frame across the whole response (a column per distinct player_id
+# seen, NA elsewhere) instead of a clean list per transaction. With
+# simplifyDataFrame=FALSE each transaction stays a plain nested list, so
+# t$adds/t$drops are simple named lists as fetch_league_transactions() below
+# expects.
+sleeper_raw <- function(path) {
+url <- paste0("https://api.sleeper.app/v1/", path)
+out <- tryCatch(jsonlite::fromJSON(url, simplifyDataFrame = FALSE),
+error = function(e) stop("Sleeper API request failed: ", url,
+"\n", conditionMessage(e)))
+if (is.null(out)) stop("Sleeper API returned NULL for: ", url)
+out
+}
+
 # --------------------------- TEAM IDENTITY -----------------------------------
 
 # roster_id -> owner name, Sleeper team name, avatar URL.
@@ -220,16 +238,15 @@ else as.character(pid)
 
 rows <- list()
 for (wk in weeks) {
-tx <- tryCatch(sleeper(paste0("league/", league_id, "/transactions/", wk)),
+tx_list <- tryCatch(sleeper_raw(paste0("league/", league_id, "/transactions/", wk)),
 error = function(e) NULL)
-if (is.null(tx) || !is.data.frame(tx) || !nrow(tx)) next
+if (is.null(tx_list) || !length(tx_list)) next
 
-for (i in seq_len(nrow(tx))) {
-t <- tx[i, ]
+for (t in tx_list) {
 if (!identical(t$status, "complete")) next
 type <- if (identical(t$type, "trade")) "Trade" else "Add/Drop"
-adds <- t$adds[[1]]
-drops <- t$drops[[1]]
+adds <- t$adds
+drops <- t$drops
 rids <- unique(c(if (!is.null(adds)) unname(unlist(adds)) else NULL,
 if (!is.null(drops)) unname(unlist(drops)) else NULL,
 unlist(t$roster_ids)))
