@@ -123,9 +123,11 @@ ui <- fluidPage(
                  tableOutput("roster_table")
         ),
         tabPanel("Transactions",
-                 helpText("All season adds/drops and trades. Click a column",
-                          "header to sort; use the filter boxes to narrow",
-                          "by Type or Team."),
+                 helpText("All adds/drops and trades, back through every",
+                          "Sleeper season for this league (no transaction",
+                          "data exists for pre-Sleeper years). Click a",
+                          "column header to sort; use the filter boxes to",
+                          "narrow by Season, Type, or Team."),
                  DT::dataTableOutput("transactions_table")
         ),
         tabPanel("Simulated Seasons",
@@ -193,7 +195,7 @@ server <- function(input, output, session) {
     c_ <- cfg()
     read_repo_csv(file.path(c_$data_dir, "Power Rankings", "Weeks 1-14",
                             paste0(c_$season_label, " ", c_$league_tag,
-                                   " Week ", wk, " Power Rankings.csv")))
+                                  " Week ", wk, " Power Rankings.csv")))
   }
 
   # Live FantasyCalc roster scores for the current league (NULL if disabled
@@ -245,19 +247,23 @@ server <- function(input, output, session) {
   transactions_data <- reactive({
     req(input$main_tabs == "Transactions")
     c_ <- cfg()
-    withProgress(message = "Loading season transactions...", value = 0.4, {
-      fetch_league_transactions(c_$league_id, 0:18, players_ref(), identity())
+    withProgress(message = "Loading transaction history...", value = 0.4, {
+      fetch_league_transactions_history(c_$league_id, 0:18, players_ref(),
+                                       c_$owner_map)
     })
   })
 
   output$transactions_table <- DT::renderDataTable({
     d <- transactions_data()
     validate(need(nrow(d) > 0, "No transactions recorded yet."))
+    d$Season <- factor(d$Season,
+                       levels = sort(unique(d$Season), decreasing = TRUE))
     d$Type <- factor(d$Type, levels = c("Add/Drop", "Trade"))
     d$Team <- factor(d$Team)
     d
   }, filter = "top", rownames = FALSE,
-     options = list(pageLength = 25, order = list(list(0, "desc"))))
+     options = list(pageLength = 25,
+                    order = list(list(0, "desc"), list(1, "desc"))))
 
   # ---- Simulated Seasons ---------------------------------------------------
   # Reads the two small CSVs written weekly by R/simulate.R (ffsimulator).
@@ -338,7 +344,7 @@ server <- function(input, output, session) {
         transform_games_df(g_wk, w)))
       pf <- aggregate(Points ~ ID, long, mean)
       cur$avg_pf <- pf$Points[match(cur$Player,
-                                    id_to_owner[as.character(pf$ID)])]
+                                   id_to_owner[as.character(pf$ID)])]
     } else {
       cur$avg_pa <- NA_real_; cur$avg_pf <- NA_real_
     }
@@ -545,7 +551,7 @@ server <- function(input, output, session) {
                         ifelse(T > 0, paste0("-", T), "")),
       `Win %`  = round((W + 0.5 * T) / (W + L + T), 3),
       check.names = FALSE, row.names = NULL)
-    out[order(-out$`Win %`, out$Opponent), ]
+    out[order(-out`Win %`, out$Opponent), ]
   }, striped = TRUE, digits = 3)
 }
 
