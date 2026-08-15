@@ -138,12 +138,12 @@ helpText("Player values are FantasyCalc redraft prices",
 tableOutput("roster_table")
 ),
 tabPanel("Transactions",
-helpText("All adds/drops and trades, back through every",
-"Sleeper season for this league (no transaction",
-"data exists for pre-Sleeper years). Cached weekly",
-"alongside the rankings, not fetched live in this",
-"app. Click a column header to sort; use the filter",
-"boxes to narrow by Season, Type, or Team."),
+selectInput("tx_season", "Season:", choices = NULL),
+helpText("All adds/drops and trades for the selected season",
+"(no transaction data exists for pre-Sleeper years).",
+"Cached weekly alongside the rankings, not fetched",
+"live in this app. Click a column header to sort;",
+"use the filter boxes to narrow by Type or Team."),
 DT::dataTableOutput("transactions_table")
 ),
 tabPanel("Simulated Seasons",
@@ -260,41 +260,44 @@ stringsAsFactors = FALSE)
 rbind(sub, total_row)
 }, striped = TRUE, digits = 0, na = "â")
 
+transaction_files <- reactive(list_transaction_files(cfg()))
+
+observeEvent(transaction_files(), {
+seasons <- sort(sub("\\.csv$", "", transaction_files()), decreasing = TRUE)
+if (length(seasons)) {
+updateSelectInput(session, "tx_season", choices = seasons,
+selected = seasons[1])
+} else {
+updateSelectInput(session, "tx_season",
+choices = c("No seasons cached yet" = ""))
+}
+}, ignoreNULL = FALSE)
+
 transactions_data <- reactive({
 req(input$main_tabs == "Transactions")
+season <- req(input$tx_season)
 c_ <- cfg()
-files <- list_transaction_files(c_)
-if (!length(files)) {
+d <- read_repo_csv(file.path(c_$data_dir, "Transactions",
+paste0(season, ".csv")))
+if (is.null(d)) {
 return(data.frame(Season = character(0), Date = character(0),
 Week = integer(0), Type = character(0),
 Team = character(0), Added = character(0),
 Dropped = character(0), stringsAsFactors = FALSE))
 }
-rows <- lapply(files, function(f) {
-read_repo_csv(file.path(c_$data_dir, "Transactions", f))
-})
-rows <- rows[!vapply(rows, is.null, logical(1))]
-if (!length(rows)) {
-return(data.frame(Season = character(0), Date = character(0),
-Week = integer(0), Type = character(0),
-Team = character(0), Added = character(0),
-Dropped = character(0), stringsAsFactors = FALSE))
-}
-out <- do.call(rbind, rows)
-out[order(out$Season, out$Date, decreasing = TRUE), ]
+d$Season <- season
+d <- d[, c("Season", "Date", "Week", "Type", "Team", "Added", "Dropped")]
+d[order(d$Date, decreasing = TRUE), ]
 })
 
 output$transactions_table <- DT::renderDataTable({
 d <- transactions_data()
-validate(need(nrow(d) > 0, "No transactions recorded yet."))
-d$Season <- factor(d$Season,
-levels = sort(unique(d$Season), decreasing = TRUE))
+validate(need(nrow(d) > 0, "No transactions recorded for this season."))
 d$Type <- factor(d$Type, levels = c("Add/Drop", "Trade"))
 d$Team <- factor(d$Team)
 d
 }, filter = "top", rownames = FALSE,
-options = list(pageLength = 25,
-order = list(list(0, "desc"), list(1, "desc"))))
+options = list(pageLength = 25, order = list(list(1, "desc"))))
 
 # ---- Simulated Seasons ---------------------------------------------------
 # Reads the two small CSVs written weekly by R/simulate.R (ffsimulator).
