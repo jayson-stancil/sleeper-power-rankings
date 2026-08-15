@@ -17,6 +17,17 @@
 # ffsimulator directly.
 # =============================================================================
 
+# nflreadr (a transitive dep of ffsimulator) defaults to an in-memory cache,
+# which is useless in CI since every weekly run is a fresh process. Switch it
+# to a filesystem cache so repeated downloads of the same historical nflverse
+# data (base_seasons 2012:2020) are skipped on subsequent runs. The actual
+# directory is controlled by the R_USER_CACHE_DIR env var (set in
+# .github/workflows/weekly.yml) and persisted across runs via actions/cache;
+# this option must be set before ffsimulator/nflreadr's namespace first
+# loads, so it lives here at the top of the file rather than inside a
+# function. Harmless no-op locally (falls back to a per-session temp dir).
+options(nflreadr.cache = "filesystem")
+
 # league_id            Sleeper league ID (string)
 # season               NFL season as an integer, e.g. 2026
 # roster_id_to_owner   Named vector/list: as.character(roster_id) -> owner
