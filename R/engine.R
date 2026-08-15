@@ -264,6 +264,49 @@ fetch_league_transactions <- function(league_id, weeks, players_ref, teams) {
   out[order(out$Date, decreasing = TRUE), ]
 }
 
+# Full transaction history across every season: walks the league chain via
+# previous_league_id (same mechanism as fetch_league_history()) and calls
+# fetch_league_transactions() once per season, tagging each season's rows.
+# Each season gets its own roster_id -> owner mapping since rosters reshuffle
+# between seasons, so owner_map (not a single teams table) is passed through
+# and resolved fresh per season. Limited to Sleeper-hosted seasons (no
+# transaction data exists for earlier, pre-Sleeper years).
+#
+# league_id   Sleeper league ID for the CURRENT season (chain walks backward)
+# weeks       Integer vector of rounds to check per season, e.g. 0:18
+# players_ref fetch_sleeper_players() output, for player_id -> name
+# owner_map   Optional data.frame(user_id, owner); NULL -> Sleeper display
+#             names, resolved per season
+fetch_league_transactions_history <- function(league_id, weeks, players_ref,
+                                              owner_map = NULL) {
+  chain <- fetch_league_chain(league_id)
+  rows <- list()
+
+  for (lg in chain) {
+    season_rows <- tryCatch({
+      users   <- sleeper(paste0("league/", lg$league_id, "/users"))
+      rosters <- sleeper(paste0("league/", lg$league_id, "/rosters"))
+      teams   <- suppressWarnings(build_team_table(users, rosters, owner_map))
+      tx <- fetch_league_transactions(lg$league_id, weeks, players_ref, teams)
+      if (nrow(tx)) tx$Season <- lg$season
+      tx
+    }, error = function(e) NULL)
+    if (!is.null(season_rows) && nrow(season_rows)) {
+      rows[[length(rows) + 1]] <- season_rows
+    }
+  }
+
+  if (!length(rows)) {
+    return(data.frame(Season = character(0), Date = character(0),
+                      Week = integer(0), Type = character(0),
+                      Team = character(0), Added = character(0),
+                      Dropped = character(0), stringsAsFactors = FALSE))
+  }
+  out <- do.call(rbind, rows)
+  out <- out[, c("Season", "Date", "Week", "Type", "Team", "Added", "Dropped")]
+  out[order(out$Season, out$Date, decreasing = TRUE), ]
+}
+
 # --------------------------- ROSTER DETAILS -------------------------------------
 # Full roster listing per team: player name/position/NFL team (from Sleeper's
 # players/nfl reference) and FantasyCalc value (NA for unpriced players, e.g.
@@ -391,7 +434,7 @@ build_graphic <- function(tbl, league_name, next_week, latest_week) {
                    "Rating", "rating_change", "record", "avg_pf", "avg_pa")]
   gt::gt(gt_df) |>
     gt::tab_header(
-      title    = gt::md(paste0("**", league_name, " — Power Rankings**")),
+      title    = gt::md(paste0("**", league_name, " â Power Rankings**")),
       subtitle = paste0("Week ", next_week,
                         "  |  Glicko-2 ratings through Week ", latest_week)
     ) |>
@@ -401,24 +444,24 @@ build_graphic <- function(tbl, league_name, next_week, latest_week) {
     ) |>
     gt::cols_label(rank = "#", move = "", avatar_url = "", team_name = "Team",
                    owner = "Owner", Rating = "Rating",
-                   rating_change = "Δ Rating", record = "W-L",
+                   rating_change = "Î Rating", record = "W-L",
                    avg_pf = "Avg PF", avg_pa = "Avg PA") |>
     gt::fmt_number(columns = "Rating", decimals = 0) |>
     gt::fmt_number(columns = "rating_change", decimals = 1,
                    force_sign = TRUE) |>
     gt::fmt_number(columns = c("avg_pf", "avg_pa"), decimals = 2) |>
-    gt::sub_missing(columns = "rating_change", missing_text = "—") |>
+    gt::sub_missing(columns = "rating_change", missing_text = "â") |>
     gt::data_color(columns = "Rating",
                    palette = c("#d73027", "#fee08b", "#1a9850")) |>
     gt::tab_style(
       style = gt::cell_text(color = "#1a9850", weight = "bold"),
       locations = gt::cells_body(columns = "move",
-                                 rows = grepl("▲", tbl$move))
+                                 rows = grepl("â²", tbl$move))
     ) |>
     gt::tab_style(
       style = gt::cell_text(color = "#d73027", weight = "bold"),
       locations = gt::cells_body(columns = "move",
-                                 rows = grepl("▼", tbl$move))
+                                 rows = grepl("â¼", tbl$move))
     ) |>
     gt::tab_style(style = gt::cell_text(weight = "bold"),
                   locations = gt::cells_body(columns = c("rank", "team_name"))) |>
@@ -570,10 +613,10 @@ run_power_rankings <- function(league_id, league_tag, season_label, base_dir,
   tbl <- tbl[order(tbl$rank), ]
   tbl$record <- paste0(tbl$Win, "-", tbl$Loss,
                        ifelse(tbl$Draw > 0, paste0("-", tbl$Draw), ""))
-  tbl$move <- ifelse(is.na(tbl$rank_change) | tbl$rank_change == 0, "—",
+  tbl$move <- ifelse(is.na(tbl$rank_change) | tbl$rank_change == 0, "â",
                      ifelse(tbl$rank_change > 0,
-                            paste0("▲ ", tbl$rank_change),
-                            paste0("▼ ", abs(tbl$rank_change))))
+                            paste0("â² ", tbl$rank_change),
+                            paste0("â¼ ", abs(tbl$rank_change))))
   tbl$avatar_url[is.na(tbl$avatar_url)] <-
     "https://sleepercdn.com/images/v2/icons/league/league_avatar_mint.png"
 
@@ -737,7 +780,7 @@ fetch_league_history <- function(league_id, owner_map = NULL,
   totals <- finalize_totals(totals, champs_df)
 
   # ---- Head-to-head matrix (W-L from the row owner's perspective)
-  h2h <- matrix("—", length(owners), length(owners),
+  h2h <- matrix("â", length(owners), length(owners),
                 dimnames = list(owners, owners))
   for (i in owners) {
     for (j in owners) {
