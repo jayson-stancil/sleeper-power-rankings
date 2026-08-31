@@ -132,10 +132,22 @@ tableOutput("ow_table")
 ),
 tabPanel("Rosters",
 selectInput("roster_owner", "Team:", choices = NULL),
+radioButtons("roster_view", "View:",
+choices = c("Table", "Composition Chart"),
+selected = "Table", inline = TRUE),
+conditionalPanel(
+"input.roster_view == 'Table'",
 helpText("Player values are FantasyCalc redraft prices",
-"(NA for unpriced players, e.g. K/DEF). TOTAL is",
-"the team's summed roster value."),
-tableOutput("roster_table")
+"(NA for unpriced players, e.g. K/DEF). Grouped by",
+"position; TOTAL roster value is in the source note."),
+gt_output("roster_table")
+),
+conditionalPanel(
+"input.roster_view == 'Composition Chart'",
+helpText("Summed FantasyCalc value by position for the",
+"selected team."),
+plotOutput("roster_comp_plot", height = "420px")
+)
 ),
 tabPanel("Transactions",
 selectInput("tx_season", "Season:", choices = NULL),
@@ -248,17 +260,73 @@ is_dynasty = isTRUE(c_$is_dynasty),
 ppr = if (is.null(c_$ppr)) 1 else c_$ppr)
 })
 
-output$roster_table <- renderTable({
+output$roster_table <- render_gt({
 rd <- roster_details()
 me <- req(input$roster_owner)
-sub <- rd[rd$Owner == me, c("Player", "Position", "NFL", "Value")]
+sub <- rd[rd$Owner == me,
+c("player_id", "Player", "Position", "NFL", "Value")]
 validate(need(nrow(sub) > 0, "No roster data for this team."))
-sub <- sub[order(-sub$Value, sub$Player), ]
-total_row <- data.frame(Player = "TOTAL", Position = "", NFL = "",
-Value = sum(sub$Value, na.rm = TRUE),
-stringsAsFactors = FALSE)
-rbind(sub, total_row)
-}, striped = TRUE, digits = 0, na = "â")
+
+pos_order <- c("QB", "RB", "WR", "TE", "K", "DEF")
+sub$Position <- factor(sub$Position,
+levels = c(pos_order, setdiff(unique(sub$Position), pos_order)))
+sub <- sub[order(sub$Position, -sub$Value, sub$Player), ]
+sub$headshot <- paste0("https://sleepercdn.com/content/nfl/players/thumb/",
+sub$player_id, ".jpg")
+sub$Position <- as.character(sub$Position)
+total_value <- sum(sub$Value, na.rm = TRUE)
+
+gt::gt(sub[, c("Position", "headshot", "Player", "NFL", "Value")],
+groupname_col = "Position") |>
+gt::text_transform(
+locations = gt::cells_body(columns = "headshot"),
+fn = function(x) gt::web_image(x, height = 28)
+) |>
+gt::cols_label(headshot = "", Player = "Player", NFL = "Team",
+Value = "Value") |>
+gt::fmt_number(columns = "Value", decimals = 0) |>
+gt::sub_missing(columns = "Value", missing_text = "—") |>
+gt::data_color(columns = "Value",
+palette = c("#fee08b", "#1a9850"), na_color = "#eeeeee") |>
+gt::tab_header(title = paste0(me, "'s Roster")) |>
+gt::tab_source_note(paste0("TOTAL roster value: ",
+format(round(total_value), big.mark = ","))) |>
+gt::tab_options(table.font.size = gt::px(13),
+data_row.padding = gt::px(4),
+row_group.font.weight = "bold")
+})
+
+output$roster_comp_plot <- renderPlot({
+rd <- roster_details()
+me <- req(input$roster_owner)
+sub <- rd[rd$Owner == me, c("Position", "Value")]
+validate(need(nrow(sub) > 0, "No roster data for this team."))
+
+pos_order <- c("QB", "RB", "WR", "TE", "K", "DEF")
+comp <- aggregate(Value ~ Position, sub, sum, na.rm = TRUE)
+comp$Position <- factor(comp$Position,
+levels = rev(c(pos_order,
+setdiff(unique(comp$Position), pos_order))))
+comp <- comp[order(comp$Position), ]
+
+pal <- c(QB = "#C44E52", RB = "#55A868", WR = "#4C72B0", TE = "#8172B2",
+K = "#CCB974", DEF = "#64B5CD")
+fill_vals <- unname(pal[as.character(comp$Position)])
+fill_vals[is.na(fill_vals)] <- "#937860"
+
+ggplot(comp, aes(x = Position, y = Value, fill = Position)) +
+geom_col(width = 0.65) +
+geom_text(aes(label = format(round(Value), big.mark = ",")),
+hjust = -0.15, size = 4, fontface = "bold") +
+scale_fill_manual(values = setNames(fill_vals, comp$Position),
+guide = "none") +
+coord_flip(clip = "off") +
+labs(x = NULL, y = "Summed FantasyCalc value",
+title = paste0(me, " -- Value by Position")) +
+theme_minimal(base_size = 14) +
+theme(plot.title = element_text(face = "bold", size = 15),
+plot.margin = margin(5, 30, 5, 5))
+})
 
 transaction_files <- reactive(list_transaction_files(cfg()))
 
@@ -334,11 +402,19 @@ ord <- aggregate(sim_rank ~ Owner, d, mean)
 ord <- ord$Owner[order(ord$sim_rank)]
 d$Owner <- factor(d$Owner, levels = rev(ord))
 
-ggplot(d, aes(x = sim_rank, y = Owner)) +
-geom_boxplot(fill = "#4C72B0", alpha = 0.6, outlier.alpha = 0.3) +
-scale_x_continuous(breaks = seq_len(length(unique(d$Owner)))) +
+n_owners <- length(levels(d$Owner))
+pal <- grDevices::colorRampPalette(
+c("#4C72B0", "#55A868", "#C44E52", "#8172B2",
+"#CCB974", "#64B5CD", "#DD8452", "#937860"))(n_owners)
+
+ggplot(d, aes(x = sim_rank, y = Owner, fill = Owner)) +
+geom_boxplot(alpha = 0.85, outlier.alpha = 0.45, outlier.size = 1.3,
+linewidth = 0.4, color = "grey35") +
+scale_fill_manual(values = pal, guide = "none") +
+scale_x_continuous(breaks = seq_len(n_owners)) +
 labs(x = "Simulated final standing (1 = best)", y = NULL) +
-theme_minimal(base_size = 13)
+theme_minimal(base_size = 14) +
+theme(panel.grid.minor = element_blank())
 })
 
 # Assembled table for the selected week
@@ -386,10 +462,10 @@ cur$avg_pa <- NA_real_; cur$avg_pf <- NA_real_
 cur <- cur[order(cur$rank), ]
 cur$record <- paste0(cur$Win, "-", cur$Loss,
 ifelse(cur$Draw > 0, paste0("-", cur$Draw), ""))
-cur$move <- ifelse(is.na(cur$rank_change) | cur$rank_change == 0, "â",
+cur$move <- ifelse(is.na(cur$rank_change) | cur$rank_change == 0, "—",
 ifelse(cur$rank_change > 0,
-paste0("â² ", cur$rank_change),
-paste0("â¼ ", abs(cur$rank_change))))
+paste0("▲ ", cur$rank_change),
+paste0("▼ ", abs(cur$rank_change))))
 cur$avatar_url[is.na(cur$avatar_url)] <-
 "https://sleepercdn.com/images/v2/icons/league/league_avatar_mint.png"
 cur$owner <- cur$Player
@@ -585,7 +661,7 @@ Record = paste0(W, "-", L,
 ifelse(T > 0, paste0("-", T), "")),
 `Win %` = round((W + 0.5 * T) / (W + L + T), 3),
 check.names = FALSE, row.names = NULL)
-out[order(-out`Win %`, out$Opponent), ]
+out[order(-out$`Win %`, out$Opponent), ]
 }, striped = TRUE, digits = 3)
 }
 
