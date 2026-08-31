@@ -42,7 +42,12 @@ jobs:
       # write_ff_simulation() then skips with "Missing packages: ffsimulator".
       # Adding ffverse's own r-universe repo as a fallback source fixes this
       # -- see https://ffscrapr.ffverse.com (Installation: R-universe).
-      - name: Install R packages
+      -  # ffsimulator's Rglpk dependency dynamically loads libglpk at runtime;
+         # it isn't on the plain ubuntu-latest image, so without this the
+         # simulation step fails with "unable to load shared object ...
+         # libglpk.so.40: cannot open shared object file".
+         - name: Install system dependencies
+           run: sudo apt-get update && sudo apt-get install -y libglpk-devname: Install R packages
         run: Rscript -e 'install.packages(c("jsonlite", "PlayerRatings", "gt", "webshot2", "ffscrapr", "ffsimulator"), repos = c("https://ffverse.r-universe.dev", getOption("repos")))'
 
       - name: Run power rankings pipeline
