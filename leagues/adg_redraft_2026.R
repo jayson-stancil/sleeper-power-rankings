@@ -17,7 +17,7 @@ list(
     #                   ranks teams 1-16 (1 = strongest roster).
     #   "manual"      - uses the roster_scores vector below instead.
     #   NULL          - disabled; all teams start at 1500, ROST SCORE hidden.
-    roster_score_source = "fantasycalc",
+    roster_score_source = "manual",
     is_dynasty = FALSE,  # FALSE = redraft player values, TRUE = dynasty
     ppr        = 1,      # matches this league's full-PPR scoring
 
@@ -31,7 +31,40 @@ list(
     # Manual override, only used when roster_score_source == "manual".
     # By roster_id (higher = stronger); e.g. reversed Borda ranks.
     # 2025 values for reference: c(16,5,8,7,13,12,9,4,15,11,1,10,2,3,14,6)
-    roster_scores = NULL,
+    #
+    # 2026 values derived from owner-supplied Borda voting results (rank,
+    # username, score, best-received rank, worst-received rank), reversed to
+    # a 1-16 "higher = stronger" scale (17 - rank). Ranked by score
+    # descending; the one tie (Kellen1923 and LiftedTJ, both scored 43) was
+    # broken by best-received rank (tied at 5), then worst-received rank
+    # (LiftedTJ's worst of 11 beat Kellen1923's worst of 12), per owner
+    # instruction. Final 1-16 order (1 = best): stancediesel1, tommypack,
+    # Neal99, GustheBuck, gabelewitt, ColKelly, Chelge, LiftedTJ, Kellen1923,
+    # juffmate, Ethanpurdy10, cg0398, elijahsartin, cheesehead42O (Sleeper
+    # display name; owner wrote "cheesehead420" -- same account, only match),
+    # ethimme, jstancil.
+    # Reordered here by roster_id 1-16 (fetched from Sleeper API 2026-08-31):
+    #   roster_id 1  jstancil      (rank 16) -> 1
+    #   roster_id 2  GustheBuck    (rank 4)  -> 13
+    #   roster_id 3  Kellen1923    (rank 9)  -> 8
+    #   roster_id 4  elijahsartin  (rank 13) -> 4
+    #   roster_id 5  ethimme       (rank 15) -> 2
+    #   roster_id 6  Neal99        (rank 3)  -> 14
+    #   roster_id 7  juffmate      (rank 10) -> 7
+    #   roster_id 8  tommypack     (rank 2)  -> 15
+    #   roster_id 9  gabelewitt    (rank 5)  -> 12
+    #   roster_id 10 ColKelly      (rank 6)  -> 11
+    #   roster_id 11 LiftedTJ      (rank 8)  -> 9
+    #   roster_id 12 Ethanpurdy10  (rank 11) -> 6
+    #   roster_id 13 cheesehead42O (rank 14) -> 3
+    #   roster_id 14 Chelge        (rank 7)  -> 10
+    #   roster_id 15 stancediesel1 (rank 1)  -> 16
+    #   roster_id 16 cg0398        (rank 12) -> 5
+    # Note: MaseratiCK renamed to ColKelly on Sleeper (same account, user_id
+    # 940792224906813440 = Colin Kelly in owner_map below) -- no owner_map
+    # change needed, this is just how the owner appears in the source data.
+    # Re-derive this vector each preseason before Week 1 of a new season.
+    roster_scores = c(1, 13, 8, 4, 2, 14, 7, 15, 12, 11, 9, 6, 3, 10, 16, 5),
 
     # Canonical owner names keyed by Sleeper user_id (stable across seasons).
     # Set to NULL to use Sleeper display names.
