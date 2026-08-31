@@ -35,8 +35,15 @@ jobs:
           restore-keys: |
             nflreadr-cache-${{ runner.os }}-
 
+      # ffscrapr/ffsimulator are on CRAN but the public RSPM binary mirror
+      # (use-public-rspm above) doesn't reliably carry pre-built binaries for
+      # them, so plain install.packages() silently fails to install them
+      # (a warning, not an error -- the step still reports success) and
+      # write_ff_simulation() then skips with "Missing packages: ffsimulator".
+      # Adding ffverse's own r-universe repo as a fallback source fixes this
+      # -- see https://ffscrapr.ffverse.com (Installation: R-universe).
       - name: Install R packages
-        run: Rscript -e 'install.packages(c("jsonlite", "PlayerRatings", "gt", "webshot2", "ffscrapr", "ffsimulator"))'
+        run: Rscript -e 'install.packages(c("jsonlite", "PlayerRatings", "gt", "webshot2", "ffscrapr", "ffsimulator"), repos = c("https://ffverse.r-universe.dev", getOption("repos")))'
 
       - name: Run power rankings pipeline
         run: Rscript run_all.R
