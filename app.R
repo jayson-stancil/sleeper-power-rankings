@@ -76,18 +76,40 @@ files[grepl("\\.csv$", files)]
 # ---- UI ---------------------------------------------------------------------
 ui <- fluidPage(
 # Rankings tab only: the gt table has 10 columns (avatars, team, owner,
-# rating, etc.) and doesn't reflow on its own. Wrapping it lets it scroll
-# horizontally on its own instead of breaking the whole page layout on a
-# narrow screen, and the media query shrinks font/padding/avatar size on
-# phone-width viewports so more of it is readable without scrolling at all.
-# Scoped to .rank-table-wrap only -- does not touch build_graphic()'s
-# gtsave() output (the static PNG/PDF), which is unaffected by app CSS.
+# rating, etc.) and shrinking the font alone still felt cramped once real
+# team/owner names filled it in -- below 600px each team instead renders
+# as its own labeled card (column labels hidden, each td stacked full-width
+# with an inline text label via nth-child, since gt doesn't emit a
+# data-label attribute to hook a generic rule off of). Column order here
+# must match build_graphic()'s gt_df column order exactly: rank, move,
+# avatar_url, team_name, owner, Rating, rating_change, record, avg_pf,
+# avg_pa. Desktop/tablet view (>600px) is untouched. Scoped to
+# .rank-table-wrap only -- does not touch build_graphic()'s gtsave()
+# output (the static PNG/PDF), which is unaffected by app CSS.
 tags$head(tags$style(HTML(paste(
 ".rank-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }",
 "@media (max-width: 600px) {",
-".rank-table-wrap .gt_table { font-size: 11px !important; }",
-".rank-table-wrap .gt_table td, .rank-table-wrap .gt_table th { padding: 3px 4px !important; }",
-".rank-table-wrap .gt_table img { height: 20px !important; width: auto !important; }",
+".rank-table-wrap .gt_col_headings { display: none; }",
+".rank-table-wrap .gt_table { width: 100%; }",
+".rank-table-wrap .gt_table img { height: 28px !important; width: auto !important; }",
+".rank-table-wrap tbody tr { display: block; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; padding: 8px 10px; }",
+".rank-table-wrap tbody td { border: none !important; padding: 2px 0 !important; font-size: 14px !important; }",
+".rank-table-wrap tbody td:nth-child(1) { display: inline-block; font-size: 18px !important; font-weight: 700; margin-right: 6px; }",
+".rank-table-wrap tbody td:nth-child(2) { display: inline-block; }",
+".rank-table-wrap tbody td:nth-child(3) { display: block; margin: 4px 0; }",
+".rank-table-wrap tbody td:nth-child(4) { display: block; font-size: 16px !important; font-weight: 600; }",
+".rank-table-wrap tbody td:nth-child(5) { display: block; }",
+".rank-table-wrap tbody td:nth-child(6) { display: block; }",
+".rank-table-wrap tbody td:nth-child(7) { display: block; }",
+".rank-table-wrap tbody td:nth-child(8) { display: block; }",
+".rank-table-wrap tbody td:nth-child(9) { display: block; }",
+".rank-table-wrap tbody td:nth-child(10) { display: block; }",
+".rank-table-wrap tbody td:nth-child(5):before { content: \"Owner: \"; font-weight: 600; color: #666; }",
+".rank-table-wrap tbody td:nth-child(6):before { content: \"Rating: \"; font-weight: 600; color: #666; }",
+".rank-table-wrap tbody td:nth-child(7):before { content: \"\\0394 Rating: \"; font-weight: 600; color: #666; }",
+".rank-table-wrap tbody td:nth-child(8):before { content: \"Record: \"; font-weight: 600; color: #666; }",
+".rank-table-wrap tbody td:nth-child(9):before { content: \"Avg PF: \"; font-weight: 600; color: #666; }",
+".rank-table-wrap tbody td:nth-child(10):before { content: \"Avg PA: \"; font-weight: 600; color: #666; }",
 "}",
 sep = "\n"
 )))),
