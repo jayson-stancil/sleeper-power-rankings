@@ -35,6 +35,13 @@ jobs:
           restore-keys: |
             nflreadr-cache-${{ runner.os }}-
 
+      # ffsimulator's Rglpk dependency dynamically loads libglpk at runtime;
+      # it isn't on the plain ubuntu-latest image, so without this the
+      # simulation step fails with "unable to load shared object ...
+      # libglpk.so.40: cannot open shared object file".
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libglpk-dev
+
       # ffscrapr/ffsimulator are on CRAN but the public RSPM binary mirror
       # (use-public-rspm above) doesn't reliably carry pre-built binaries for
       # them, so plain install.packages() silently fails to install them
