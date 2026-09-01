@@ -75,6 +75,22 @@ files[grepl("\\.csv$", files)]
 
 # ---- UI ---------------------------------------------------------------------
 ui <- fluidPage(
+# Rankings tab only: the gt table has 10 columns (avatars, team, owner,
+# rating, etc.) and doesn't reflow on its own. Wrapping it lets it scroll
+# horizontally on its own instead of breaking the whole page layout on a
+# narrow screen, and the media query shrinks font/padding/avatar size on
+# phone-width viewports so more of it is readable without scrolling at all.
+# Scoped to .rank-table-wrap only -- does not touch build_graphic()'s
+# gtsave() output (the static PNG/PDF), which is unaffected by app CSS.
+tags$head(tags$style(HTML(paste(
+".rank-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }",
+"@media (max-width: 600px) {",
+".rank-table-wrap .gt_table { font-size: 11px !important; }",
+".rank-table-wrap .gt_table td, .rank-table-wrap .gt_table th { padding: 3px 4px !important; }",
+".rank-table-wrap .gt_table img { height: 20px !important; width: auto !important; }",
+"}",
+sep = "\n"
+)))),
 titlePanel("Sleeper Power Rankings"),
 sidebarLayout(
 sidebarPanel(
@@ -91,7 +107,7 @@ mainPanel(
 width = 9,
 tabsetPanel(
 id = "main_tabs",
-tabPanel("Rankings", gt_output("rank_table")),
+tabPanel("Rankings", div(class = "rank-table-wrap", gt_output("rank_table"))),
 tabPanel("League Stats",
 selectInput("stats_view", "View:",
 choices = c("Summary", "Points For",
@@ -265,7 +281,7 @@ rd <- roster_details()
 me <- req(input$roster_owner)
 sub <- rd[rd$Owner == me,
 c("player_id", "Player", "Position", "NFL", "Value")]
-validate(need(nrow(sub) > 0, "No roster data for this team."))
+shiny::validate(shiny::need(nrow(sub) > 0, "No roster data for this team."))
 
 pos_order <- c("QB", "RB", "WR", "TE", "K", "DEF")
 sub$Position <- factor(sub$Position,
@@ -300,7 +316,7 @@ output$roster_comp_plot <- renderPlot({
 rd <- roster_details()
 me <- req(input$roster_owner)
 sub <- rd[rd$Owner == me, c("Position", "Value")]
-validate(need(nrow(sub) > 0, "No roster data for this team."))
+shiny::validate(shiny::need(nrow(sub) > 0, "No roster data for this team."))
 
 pos_order <- c("QB", "RB", "WR", "TE", "K", "DEF")
 comp <- aggregate(Value ~ Position, sub, sum, na.rm = TRUE)
@@ -360,7 +376,7 @@ d[order(d$Date, decreasing = TRUE), ]
 
 output$transactions_table <- DT::renderDataTable({
 d <- transactions_data()
-validate(need(nrow(d) > 0, "No transactions recorded for this season."))
+shiny::validate(shiny::need(nrow(d) > 0, "No transactions recorded for this season."))
 d$Type <- factor(d$Type, levels = c("Add/Drop", "Trade"))
 d$Team <- factor(d$Team)
 d
@@ -385,7 +401,7 @@ season = read_repo_csv(file.path(c_$data_dir, "Simulation",
 
 output$sim_summary_table <- renderTable({
 d <- sim_data()$summary
-validate(need(!is.null(d), paste("No simulation data yet -- runs",
+shiny::validate(shiny::need(!is.null(d), paste("No simulation data yet -- runs",
 "weekly alongside the rankings.")))
 out <- d[, c("Owner", "h2h_winpct", "allplay_winpct", "points_for",
 "points_against", "made_playoffs", "last_place")]
@@ -396,7 +412,7 @@ out[order(-out$`Playoff Odds`), ]
 
 output$sim_rank_plot <- renderPlot({
 d <- sim_data()$season
-validate(need(!is.null(d), paste("No simulation data yet -- runs",
+shiny::validate(shiny::need(!is.null(d), paste("No simulation data yet -- runs",
 "weekly alongside the rankings.")))
 ord <- aggregate(sim_rank ~ Owner, d, mean)
 ord <- ord$Owner[order(ord$sim_rank)]
@@ -421,7 +437,7 @@ theme(panel.grid.minor = element_blank())
 tbl <- reactive({
 wk <- as.integer(req(input$week))
 cur <- weekly_csv(wk)
-validate(need(!is.null(cur), "No rankings file for this week yet."))
+shiny::validate(shiny::need(!is.null(cur), "No rankings file for this week yet."))
 cur <- cur[order(-cur$Rating), ]
 cur$rank <- seq_len(nrow(cur))
 
@@ -482,12 +498,12 @@ build_graphic(tbl(), league_meta()$name, wk, wk - 1)
 summary_data <- reactive({
 c_ <- cfg()
 wks <- sort(week_from_filename(weekly_files()), decreasing = TRUE)
-validate(need(length(wks) > 0, "No rankings yet - season not started."))
+shiny::validate(shiny::need(length(wks) > 0, "No rankings yet - season not started."))
 latest <- weekly_csv(wks[1])
-validate(need(!is.null(latest), "No rankings file for the latest week."))
+shiny::validate(shiny::need(!is.null(latest), "No rankings file for the latest week."))
 
 g <- games()
-validate(need(!is.null(g), "No matchup data yet."))
+shiny::validate(shiny::need(!is.null(g), "No matchup data yet."))
 
 ids <- identity()
 id_to_owner <- setNames(ids$owner, ids$roster_id)
@@ -537,7 +553,7 @@ summary_data()
 
 traj_data <- reactive({
 wks <- sort(week_from_filename(weekly_files()))
-validate(need(length(wks) > 1, "Trajectories appear after two weeks."))
+shiny::validate(shiny::need(length(wks) > 1, "Trajectories appear after two weeks."))
 do.call(rbind, lapply(wks, function(w) {
 d <- weekly_csv(w)
 if (is.null(d)) return(NULL)
@@ -626,13 +642,13 @@ cfg()$history_seed)
 
 output$champions <- renderTable({
 ch <- history()$champions
-validate(need(nrow(ch) > 0, "No completed seasons with a champion yet."))
+shiny::validate(shiny::need(nrow(ch) > 0, "No completed seasons with a champion yet."))
 ch
 }, striped = TRUE)
 
 output$alltime <- renderTable({
 t <- history()$totals
-validate(need(!is.null(t), "No completed games in league history yet."))
+shiny::validate(shiny::need(!is.null(t), "No completed games in league history yet."))
 t
 }, striped = TRUE, digits = 3)
 
@@ -648,10 +664,10 @@ selected = owners[1])
 # One owner at a time: vertical table reads cleanly on phones
 output$h2h <- renderTable({
 lg <- history()$long
-validate(need(!is.null(lg), "No completed games in league history yet."))
+shiny::validate(shiny::need(!is.null(lg), "No completed games in league history yet."))
 me <- req(input$h2h_owner)
 sub <- lg[lg$owner == me, , drop = FALSE]
-validate(need(nrow(sub) > 0, "No games recorded for this owner."))
+shiny::validate(shiny::need(nrow(sub) > 0, "No games recorded for this owner."))
 W <- tapply(sub$win == 1, sub$opponent, sum)
 L <- tapply(sub$win == 0, sub$opponent, sum)
 T <- tapply(sub$win == 0.5, sub$opponent, sum)
