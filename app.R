@@ -140,8 +140,9 @@ conditionalPanel(
 "input.stats_view == 'Summary'",
 h4("Season Summary"),
 helpText("OVW = Overall Wins: teams beaten that week if",
-"every team played every team (all-play record)."),
-tableOutput("summary_table")
+"every team played every team (all-play record).",
+"Click a column header to sort."),
+DT::dataTableOutput("summary_table")
 ),
 conditionalPanel(
 "input.stats_view == 'Rating Trajectory'",
@@ -154,18 +155,20 @@ plotOutput("trajectory", height = "550px")
 ),
 conditionalPanel(
 "input.stats_view == 'Points For'",
-tableOutput("pf_table")
+helpText("Click a column header to sort."),
+DT::dataTableOutput("pf_table")
 ),
 conditionalPanel(
 "input.stats_view == 'Points Against'",
-tableOutput("pa_table")
+helpText("Click a column header to sort."),
+DT::dataTableOutput("pa_table")
 ),
 conditionalPanel(
 "input.stats_view == 'Overall Wins'",
 helpText("Teams beaten each week if every team played",
 "every team (all-play record), not just the",
-"actual opponent."),
-tableOutput("ow_table")
+"actual opponent. Click a column header to sort."),
+DT::dataTableOutput("ow_table")
 )
 ),
 tabPanel("Rosters",
@@ -567,9 +570,12 @@ out$`AVG PF RANK` <- as.integer(rank(-out$`AVG PF`, ties.method = "min"))
 out[order(out$`WINS RANK`), ]
 })
 
-output$summary_table <- renderTable({
-summary_data()
-}, striped = TRUE, digits = 2)
+output$summary_table <- DT::renderDataTable({
+DT::datatable(summary_data(), rownames = FALSE,
+options = list(dom = "t", paging = FALSE,
+searching = FALSE, info = FALSE,
+order = list()))
+})
 
 # ---- League Stats: Rating Trajectory -----------------------------------
 
@@ -624,30 +630,48 @@ p
 
 # ---- League Stats: Points For -------------------------------------------
 
-output$pf_table <- renderTable({
+output$pf_table <- DT::renderDataTable({
 g <- games(); req(g)
-create_points_for_table(g, identity())
-}, digits = 2, na = "")
+d <- create_points_for_table(g, identity())
+num_cols <- names(d)[vapply(d, is.numeric, logical(1))]
+DT::datatable(d, rownames = FALSE,
+options = list(dom = "t", paging = FALSE,
+searching = FALSE, info = FALSE,
+order = list())) |>
+DT::formatRound(columns = num_cols, digits = 2)
+})
 
 # ---- League Stats: Points Against --------------------------------------
 
-output$pa_table <- renderTable({
+output$pa_table <- DT::renderDataTable({
 g <- games(); req(g)
 ids <- identity()
 pa <- create_points_against_table(g)
 pa$Team <- setNames(ids$owner, ids$roster_id)[as.character(pa$Team)]
-pa[order(pa$total_pa), ]
-}, digits = 2)
+pa <- pa[order(pa$total_pa), ]
+num_cols <- names(pa)[vapply(pa, is.numeric, logical(1))]
+DT::datatable(pa, rownames = FALSE,
+options = list(dom = "t", paging = FALSE,
+searching = FALSE, info = FALSE,
+order = list())) |>
+DT::formatRound(columns = num_cols, digits = 2)
+})
 
 # ---- League Stats: Overall Wins ----------------------------------------
 
-output$ow_table <- renderTable({
+output$ow_table <- DT::renderDataTable({
 g <- games(); req(g)
 ids <- identity()
 t <- build_overall_wins_table(g)
 t$Team <- setNames(ids$owner, ids$roster_id)[as.character(t$Team)]
-t[order(-t$Total), ]
-}, digits = 1)
+t <- t[order(-t$Total), ]
+num_cols <- names(t)[vapply(t, is.numeric, logical(1))]
+DT::datatable(t, rownames = FALSE,
+options = list(dom = "t", paging = FALSE,
+searching = FALSE, info = FALSE,
+order = list())) |>
+DT::formatRound(columns = num_cols, digits = 1)
+})
 
 # ---- League History -----------------------------------------------------
 # Lazy: walks previous_league_id through all seasons the first time the
