@@ -463,7 +463,7 @@ shiny::validate(shiny::need(!is.null(cur), "No rankings file for this week yet."
 cur <- cur[order(-cur$Rating), ]
 cur$rank <- seq_len(nrow(cur))
 
-prev <- if (wk > 2) weekly_csv(wk - 1) else NULL
+prev <- if (wk > 1) weekly_csv(wk - 1) else NULL
 if (!is.null(prev)) {
 prev <- prev[order(-prev$Rating), ]
 prev$prev_rank <- seq_len(nrow(prev))
