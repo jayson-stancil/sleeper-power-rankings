@@ -57,7 +57,7 @@ run_ff_simulation <- function(league_id, season, roster_id_to_owner,
   conn <- ffsimulator::sleeper_connect(season = season, league_id = league_id)
   sim  <- ffsimulator::ff_simulate(conn, n_seasons = n_seasons,
                                    n_weeks = n_weeks, seed = seed,
-                                   verbose = FALSE)
+                                   verbose = FALSE,actual_schedule = TRUE)
 
   playoff_teams <- tryCatch(
     sleeper(paste0("league/", league_id))$settings$playoff_teams,
