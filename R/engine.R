@@ -234,8 +234,10 @@ stringsAsFactors = FALSE)[order(rosters$roster_id), ]
 }
 
 # --------------------------- TRANSACTIONS --------------------------------------
-# Season transaction log: adds/drops (waiver or free agency) and trades, one
-# row per team side per transaction so the whole log is a single flat table
+# Season transaction log: adds/drops (waiver or free agency) and trades --
+# including traded draft picks, which Sleeper reports in a transaction's
+# separate "draft_picks" array rather than in adds/drops -- one row per team
+# side per transaction so the whole log is a single flat table
 # (sortable/filterable client-side in the Shiny app via DT). No FantasyCalc
 # dependency -- just Sleeper's own transaction records and player names.
 
@@ -253,6 +255,13 @@ p <- players_ref[[as.character(pid)]]
 if (!is.null(p$full_name) && nzchar(p$full_name)) p$full_name
 else as.character(pid)
 }
+# A traded draft pick, e.g. "2027 Round 1 Pick". Confirmed against this
+# league's live /draft_picks payload: each element of a trade's
+# draft_picks array has season (string), round (int), owner_id (new
+# holder after this trade), and previous_owner_id (holder just before
+# it) -- roster_id on the element is the pick's original/home roster and
+# is NOT who it moved between, so it's unused here.
+fmt_pick <- function(p) paste0(p$season, " Round ", p$round, " Pick")
 
 rows <- list()
 for (wk in weeks) {
@@ -265,9 +274,13 @@ if (!identical(t$status, "complete")) next
 type <- if (identical(t$type, "trade")) "Trade" else "Add/Drop"
 adds <- t$adds
 drops <- t$drops
+picks <- t$draft_picks
+if (!is.list(picks)) picks <- list()
+pick_owner <- vapply(picks, function(p) as.integer(p$owner_id), integer(1))
+pick_prev_owner <- vapply(picks, function(p) as.integer(p$previous_owner_id), integer(1))
 rids <- unique(c(if (!is.null(adds)) unname(unlist(adds)) else NULL,
 if (!is.null(drops)) unname(unlist(drops)) else NULL,
-unlist(t$roster_ids)))
+unlist(t$roster_ids), pick_owner, pick_prev_owner))
 if (!length(rids)) next
 
 for (rid in rids) {
@@ -275,15 +288,20 @@ added_p <- if (!is.null(adds)) names(adds)[unlist(adds) == rid]
 else character(0)
 dropped_p <- if (!is.null(drops)) names(drops)[unlist(drops) == rid]
 else character(0)
-if (!length(added_p) && !length(dropped_p)) next
+added_pk <- vapply(picks[pick_owner == rid], fmt_pick, character(1))
+dropped_pk <- vapply(picks[pick_prev_owner == rid], fmt_pick, character(1))
+if (!length(added_p) && !length(dropped_p) &&
+!length(added_pk) && !length(dropped_pk)) next
 rows[[length(rows) + 1]] <- data.frame(
 Date = format(as.POSIXct(t$created / 1000, origin = "1970-01-01",
 tz = "America/New_York"), "%Y-%m-%d"),
 Week = wk,
 Type = type,
 Team = unname(id_to_owner[as.character(rid)]),
-Added = paste(vapply(added_p, pname, character(1)), collapse = ", "),
-Dropped = paste(vapply(dropped_p, pname, character(1)), collapse = ", "),
+Added = paste(c(vapply(added_p, pname, character(1)), added_pk),
+collapse = ", "),
+Dropped = paste(c(vapply(dropped_p, pname, character(1)), dropped_pk),
+collapse = ", "),
 stringsAsFactors = FALSE)
 }
 }
