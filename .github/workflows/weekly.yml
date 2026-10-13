@@ -5,6 +5,18 @@ on:
     - cron: "0 11 * * 2"   # Tuesdays 11:00 UTC = 6:00 AM ET
   workflow_dispatch:        # manual trigger from the Actions tab
 
+# Serializes runs of this workflow on this branch so a manual run (or a
+# second scheduled run) can never commit+push at the same time as another
+# one already in flight. Without this, two overlapping runs race to push
+# to main and the second one's "git-auto-commit-action" step fails with a
+# non-fast-forward rejection -- the run's data changes compute fine but
+# never get committed. cancel-in-progress is false (not true) so an
+# overlapping run queues and still completes, instead of being killed
+# mid-run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
