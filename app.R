@@ -428,10 +428,24 @@ output$sim_summary_table <- renderTable({
 d <- sim_data()$summary
 shiny::validate(shiny::need(!is.null(d), paste("No simulation data yet -- runs",
 "weekly alongside the rankings.")))
+
+# total_games (regular-season games the W-L record below is out of) was
+# added alongside this column; fall back to a win%-derived estimate for
+# any cached CSV written before that change, until next week's run
+# refreshes it.
+if (!"total_games" %in% names(d)) {
+d$total_games <- ifelse(d$h2h_winpct > 0,
+round(d$h2h_wins / d$h2h_winpct), NA_integer_)
+}
+wins <- round(d$h2h_wins)
+losses <- d$total_games - wins
+record <- ifelse(is.na(losses), "--", paste0(wins, "-", losses))
+
 out <- d[, c("Owner", "h2h_winpct", "allplay_winpct", "points_for",
 "points_against", "made_playoffs", "last_place")]
-names(out) <- c("Owner", "H2H Win%", "All-Play Win%", "Avg PF", "Avg PA",
-"Playoff Odds", "Last Place Odds")
+out <- cbind(out[1], `W-L` = record, out[-1])
+names(out) <- c("Owner", "W-L", "H2H Win%", "All-Play Win%", "Avg PF",
+"Avg PA", "Playoff Odds", "Last Place Odds")
 out[order(-out$`Playoff Odds`), ]
 }, striped = TRUE, digits = 3)
 

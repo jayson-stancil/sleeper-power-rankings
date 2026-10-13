@@ -265,6 +265,10 @@ run_ff_simulation <- function(league_id, season, roster_id_to_owner,
   }
   summ <- merge(summ, odds, by = "roster_id", all.x = TRUE)
   summ$Owner <- unname(roster_id_to_owner[as.character(summ$roster_id)])
+  # Regular-season games the above record is out of (real + simulated
+  # weeks combined). Written alongside h2h_wins so the app can display a
+  # literal "W-L" record without re-deriving it from a win percentage.
+  summ$total_games <- total_games
 
   if (any(is.na(summ$Owner))) {
     warning("ff_simulate: could not map some franchise_id values to a ",
