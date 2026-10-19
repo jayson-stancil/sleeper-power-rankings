@@ -579,6 +579,77 @@ heading.title.font.size = gt::px(20),
 data_row.padding = gt::px(6))
 }
 
+# gt table for the standalone "NFL Power Rankings" tab. tbl is one row per
+# NFL team from the separate nfl-power-rankings repo's data/current.csv
+# (Rank, Team, ABBREV, Rating, Deviation, Volatility, Record, RankChange,
+# RatingChange, PreseasonRank, Week, WeekLabel); teams is that repo's
+# data/teams.csv (ABBREV, Team, Logo), or NULL before that repo's first
+# Action run has generated it yet -- the table still renders, just without
+# logos, rather than failing. This computation does not happen in this
+# repo; this function only renders data someone else already computed.
+build_nfl_graphic <- function(tbl, teams, week_label, latest_week) {
+gt_df <- data.frame(
+Rank = tbl$Rank,
+move = ifelse(tbl$RankChange == 0, "\u2014",
+ifelse(tbl$RankChange > 0, paste0("\u25B2 ", tbl$RankChange),
+paste0("\u25BC ", abs(tbl$RankChange)))),
+Team = tbl$Team,
+Rating = tbl$Rating,
+RatingChange = tbl$RatingChange,
+Record = tbl$Record,
+stringsAsFactors = FALSE
+)
+has_logos <- !is.null(teams) && all(c("ABBREV", "Logo") %in% names(teams))
+if (has_logos) {
+gt_df$logo <- unname(teams$Logo[match(tbl$ABBREV, teams$ABBREV)])
+gt_df <- gt_df[, c("Rank", "move", "logo", "Team", "Rating",
+"RatingChange", "Record")]
+} else {
+gt_df <- gt_df[, c("Rank", "move", "Team", "Rating", "RatingChange",
+"Record")]
+}
+
+g <- gt::gt(gt_df) |>
+gt::tab_header(
+title = gt::md("**NFL Power Rankings**"),
+subtitle = paste0(week_label, " | Glicko-2 ratings through Week ",
+latest_week)
+) |>
+gt::cols_label(move = "", Rating = "Rating", RatingChange = "\u0394 Rating",
+Record = "W-L") |>
+gt::fmt_number(columns = "Rating", decimals = 0) |>
+gt::fmt_number(columns = "RatingChange", decimals = 1,
+force_sign = TRUE) |>
+gt::sub_missing(columns = "RatingChange", missing_text = "\u2014") |>
+gt::data_color(columns = "Rating",
+palette = c("#d73027", "#fee08b", "#1a9850")) |>
+gt::tab_style(
+style = gt::cell_text(color = "#1a9850", weight = "bold"),
+locations = gt::cells_body(columns = "move",
+rows = grepl("\u25B2", gt_df$move))
+) |>
+gt::tab_style(
+style = gt::cell_text(color = "#d73027", weight = "bold"),
+locations = gt::cells_body(columns = "move",
+rows = grepl("\u25BC", gt_df$move))
+) |>
+gt::tab_style(style = gt::cell_text(weight = "bold"),
+locations = gt::cells_body(columns = c("Rank", "Team"))) |>
+gt::tab_source_note(paste0("Generated ", format(Sys.Date(), "%B %d, %Y"),
+" | Glicko-2 (PlayerRatings), nflverse data")) |>
+gt::tab_options(table.font.size = gt::px(14),
+heading.title.font.size = gt::px(20),
+data_row.padding = gt::px(6))
+
+if (has_logos) {
+g <- g |>
+gt::text_transform(locations = gt::cells_body(columns = "logo"),
+fn = function(x) gt::web_image(x, height = 28)) |>
+gt::cols_label(logo = "")
+}
+g
+}
+
 # --------------------------- PRESEASON SNAPSHOT ------------------------------
 # Publishes the initial (roster-seeded) Glicko-2 ratings as "Week 1 Power
 # Rankings" before any games have been played this season. Games/Win/Draw/

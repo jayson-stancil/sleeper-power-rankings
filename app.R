@@ -16,6 +16,14 @@ GH_USER <- "jayson-stancil"
 GH_REPO <- "sleeper-power-rankings"
 GH_BRANCH <- "main"
 
+# Independent NFL-wide power rankings pipeline (separate repo, no app of
+# its own) that all three league apps read identically -- see the "NFL
+# Power Rankings" tab below. Not league-specific, so these never change
+# per-league the way GH_REPO above does.
+NFL_GH_USER <- "jayson-stancil"
+NFL_GH_REPO <- "nfl-power-rankings"
+NFL_GH_BRANCH <- "main"
+
 source("R/engine.R") # sleeper(), build_team_table(), stats helpers
 
 # ---- League configs ---------------------------------------------------------
@@ -24,20 +32,29 @@ leagues <- lapply(league_files, function(f) source(f, local = new.env())$value)
 names(leagues) <- vapply(leagues, `[[`, character(1), "league_tag")
 
 # ---- GitHub data access (raw URL first for freshness, local bundle fallback)
-raw_url <- function(path) {
-paste0("https://raw.githubusercontent.com/", GH_USER, "/", GH_REPO, "/",
-GH_BRANCH, "/", utils::URLencode(path))
+# user/repo/branch default to this app's own repo; the NFL Power Rankings
+# tab passes the nfl-power-rankings repo's constants instead via
+# read_nfl_csv() below -- same reader, different source repo.
+raw_url <- function(path, user = GH_USER, repo = GH_REPO, branch = GH_BRANCH) {
+paste0("https://raw.githubusercontent.com/", user, "/", repo, "/",
+branch, "/", utils::URLencode(path))
 }
 
-read_repo_csv <- function(path) {
+read_repo_csv <- function(path, user = GH_USER, repo = GH_REPO,
+                          branch = GH_BRANCH) {
 out <- suppressWarnings(
-tryCatch(read.csv(raw_url(path), stringsAsFactors = FALSE,
+tryCatch(read.csv(raw_url(path, user, repo, branch), stringsAsFactors = FALSE,
 check.names = FALSE),
 error = function(e) NULL))
 if (is.null(out) && file.exists(path)) {
 out <- read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
 }
 out
+}
+
+read_nfl_csv <- function(path) {
+read_repo_csv(path, user = NFL_GH_USER, repo = NFL_GH_REPO,
+             branch = NFL_GH_BRANCH)
 }
 
 # List weekly rankings files: GitHub contents API (fresh), local fallback
@@ -110,6 +127,29 @@ tags$head(tags$style(HTML(paste(
 ".rank-table-wrap tbody td:nth-child(8):before { content: \"Record: \"; font-weight: 600; color: #666; }",
 ".rank-table-wrap tbody td:nth-child(9):before { content: \"Avg PF: \"; font-weight: 600; color: #666; }",
 ".rank-table-wrap tbody td:nth-child(10):before { content: \"Avg PA: \"; font-weight: 600; color: #666; }",
+"}",
+# NFL Power Rankings tab: same stacked-card approach, scoped to its own
+# wrapper class since this table has a different column count/order
+# (build_nfl_graphic()'s gt_df: Rank, move, logo, Team, Rating,
+# RatingChange, Record -- 7 columns, no separate \"owner\" line) and must
+# not inherit the .rank-table-wrap rules above.
+".nfl-rank-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }",
+"@media (max-width: 600px) {",
+".nfl-rank-table-wrap .gt_col_headings { display: none; }",
+".nfl-rank-table-wrap .gt_table { width: 100%; }",
+".nfl-rank-table-wrap .gt_table img { height: 40px !important; width: auto !important; }",
+".nfl-rank-table-wrap tbody tr { display: block; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; padding: 8px 10px; overflow: hidden; }",
+".nfl-rank-table-wrap tbody td { border: none !important; padding: 3px 0 !important; font-size: 14px !important; text-align: left !important; line-height: 1.4 !important; height: auto !important; vertical-align: baseline !important; }",
+".nfl-rank-table-wrap tbody td:nth-child(1) { display: block; float: left; font-size: 18px !important; font-weight: 700; margin-right: 6px; }",
+".nfl-rank-table-wrap tbody td:nth-child(2) { display: block; float: left; margin-right: 6px; }",
+".nfl-rank-table-wrap tbody td:nth-child(3) { display: block; float: left; clear: left; margin: 6px 8px 6px 0; }",
+".nfl-rank-table-wrap tbody td:nth-child(4) { display: block; float: left; font-size: 17px !important; font-weight: 600; margin-top: 12px; }",
+".nfl-rank-table-wrap tbody td:nth-child(5) { display: inline-block !important; width: auto !important; padding: 4px 10px !important; border-radius: 6px; font-weight: 700; margin: 4px 0 !important; clear: both; }",
+".nfl-rank-table-wrap tbody td:nth-child(6) { display: block; }",
+".nfl-rank-table-wrap tbody td:nth-child(7) { display: block; }",
+".nfl-rank-table-wrap tbody td:nth-child(5):before { content: \"Rating: \"; font-weight: 600; color: inherit; }",
+".nfl-rank-table-wrap tbody td:nth-child(6):before { content: \"\\0394 Rating: \"; font-weight: 600; color: #666; }",
+".nfl-rank-table-wrap tbody td:nth-child(7):before { content: \"Record: \"; font-weight: 600; color: #666; }",
 "}",
 sep = "\n"
 )))),
@@ -207,6 +247,28 @@ helpText("Monte Carlo season simulations (ffsimulator):",
 tableOutput("sim_summary_table"),
 h4("Distribution of Simulated Final Standings"),
 plotOutput("sim_rank_plot", height = "500px")
+),
+tabPanel("NFL Power Rankings",
+selectInput("nfl_view", "View:",
+choices = c("Current Week Power Rankings", "Rating Trajectory"),
+selected = "Current Week Power Rankings"),
+helpText("All 32 NFL teams, Glicko-2 ratings seeded by a preseason",
+"media consensus. Computed independently of this league",
+"and updated weekly -- see github.com/jayson-stancil/",
+"nfl-power-rankings."),
+conditionalPanel(
+"input.nfl_view == 'Current Week Power Rankings'",
+div(class = "nfl-rank-table-wrap", gt_output("nfl_rank_table"))
+),
+conditionalPanel(
+"input.nfl_view == 'Rating Trajectory'",
+helpText("Highlighted teams are drawn in color; the rest",
+"of the league shows as gray context lines."),
+selectizeInput("nfl_traj_teams", "Highlight:", choices = NULL,
+multiple = TRUE,
+options = list(placeholder = "Select teams...")),
+plotOutput("nfl_trajectory", height = "550px")
+)
 ),
 tabPanel("League History",
 h4("Champions"),
@@ -470,6 +532,65 @@ scale_x_continuous(breaks = seq_len(n_owners)) +
 labs(x = "Simulated final standing (1 = best)", y = NULL) +
 theme_minimal(base_size = 14) +
 theme(panel.grid.minor = element_blank())
+})
+
+# ---- NFL Power Rankings --------------------------------------------------
+# Reads the separate nfl-power-rankings repo's data/ CSVs directly (via
+# read_nfl_csv() -- same reader as read_repo_csv(), pointed at NFL_GH_*
+# instead of this app's own GH_*). Not computed here, not league-specific,
+# shared identically by all three league apps.
+
+nfl_current <- reactive(read_nfl_csv("current.csv"))
+nfl_history <- reactive(read_nfl_csv("history.csv"))
+nfl_teams   <- reactive(read_nfl_csv("teams.csv"))
+
+output$nfl_rank_table <- render_gt({
+d <- nfl_current()
+shiny::validate(shiny::need(!is.null(d) && nrow(d) > 0,
+"No NFL power rankings yet."))
+build_nfl_graphic(d, nfl_teams(), d$WeekLabel[1], d$Week[1])
+})
+
+# Default highlight: current top 3 by rating
+observeEvent(nfl_history(), {
+d <- nfl_history()
+if (is.null(d) || !nrow(d)) return(NULL)
+latest <- d[d$Week == max(d$Week), ]
+top3 <- latest$Team[order(-latest$Rating)][seq_len(min(3, nrow(latest)))]
+updateSelectizeInput(session, "nfl_traj_teams",
+choices = sort(unique(d$Team)), selected = top3)
+})
+
+output$nfl_trajectory <- renderPlot({
+d <- nfl_history()
+shiny::validate(shiny::need(!is.null(d) && nrow(d) > 0,
+"No NFL rating history yet -- appears after Week 2."))
+wks <- sort(unique(d$Week))
+sel <- input$nfl_traj_teams
+
+p <- ggplot(d, aes(Week, Rating, group = Team)) +
+geom_line(color = "grey80", linewidth = 0.6) +
+geom_hline(yintercept = 1500, linetype = "dashed", color = "grey55") +
+scale_x_continuous(breaks = wks,
+expand = expansion(mult = c(0.02, 0.22))) +
+labs(x = "NFL week", y = "Glicko-2 rating",
+title = "NFL Rating Trajectory") +
+theme_minimal(base_size = 14) +
+theme(legend.position = "none")
+
+if (length(sel)) {
+dh <- d[d$Team %in% sel, , drop = FALSE]
+lab <- dh[dh$Week == max(wks), , drop = FALSE]
+p <- p +
+geom_line(data = dh, aes(color = Team), linewidth = 1.3) +
+geom_point(data = dh, aes(color = Team), size = 2.2) +
+geom_text(data = lab,
+aes(color = Team,
+label = paste0(Team, " (", round(Rating), ")")),
+hjust = -0.08, fontface = "bold", size = 4.2,
+show.legend = FALSE)
+}
+p
 })
 
 # Assembled table for the selected week
