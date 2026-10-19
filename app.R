@@ -53,7 +53,7 @@ out
 }
 
 read_nfl_csv <- function(path) {
-read_repo_csv(path, user = NFL_GH_USER, repo = NFL_GH_REPO,
+read_repo_csv(file.path("data", path), user = NFL_GH_USER, repo = NFL_GH_REPO,
              branch = NFL_GH_BRANCH)
 }
 
