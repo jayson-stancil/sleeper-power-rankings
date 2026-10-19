@@ -21,7 +21,7 @@ GH_BRANCH <- "main"
 # Power Rankings" tab below. Not league-specific, so these never change
 # per-league the way GH_REPO above does.
 NFL_GH_USER <- "jayson-stancil"
-NFL_GH_REPO <- "nfl-power-rankings"
+NFL_GH_REPO <- "nfl_power_rankings"
 NFL_GH_BRANCH <- "main"
 
 source("R/engine.R") # sleeper(), build_team_table(), stats helpers
