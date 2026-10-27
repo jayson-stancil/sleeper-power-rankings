@@ -376,6 +376,20 @@ levels = c(pos_order, setdiff(unique(sub$Position), pos_order)))
 sub <- sub[order(sub$Position, -sub$Value, sub$Player), ]
 sub$headshot <- paste0("https://sleepercdn.com/content/nfl/players/thumb/",
 sub$player_id, ".jpg")
+# Team defenses have no Sleeper headshot -- use the NFL team logo (same
+# source as the NFL Power Rankings tab) instead, matched on the DEF's own
+# team abbreviation (held in NFL for a defense row).
+is_def <- sub$Position == "DEF"
+if (any(is_def)) {
+nt <- nfl_teams()
+if (!is.null(nt) && all(c("ABBREV", "Logo") %in% names(nt))) {
+# Sleeper uses "LAR" for the Rams; the nflverse-sourced teams.csv uses
+# "LA" (its convention since the 2016 relocation) -- reconcile that one
+# known mismatch before matching.
+def_abbrev <- ifelse(sub$NFL[is_def] == "LAR", "LA", sub$NFL[is_def])
+sub$headshot[is_def] <- nt$Logo[match(def_abbrev, nt$ABBREV)]
+}
+}
 sub$Position <- as.character(sub$Position)
 total_value <- sum(sub$Value, na.rm = TRUE)
 
