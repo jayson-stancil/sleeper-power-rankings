@@ -153,16 +153,20 @@ tags$head(tags$style(HTML(paste(
 "}",
 # Week Matchups sub-tab (Simulated Seasons): one card per matchup, each
 # with the two teams' avatars and a two-color win-probability bar.
-".matchup-card { border: 1px solid #ddd; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }",
-".matchup-teams { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }",
+# Container is capped to roughly the Rankings table's width so the page
+# doesn't stretch full-bleed on desktop.
+".matchup-container { max-width: 480px; }",
+".matchup-card { border: 1px solid #ddd; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }",
+".matchup-teams { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }",
 ".matchup-team { display: flex; flex-direction: column; align-items: center; width: 40%; }",
-".matchup-avatar { width: 64px; height: 64px; border-radius: 6px; border: 1px solid #ccc; object-fit: cover; }",
-".matchup-name { margin-top: 6px; font-weight: 600; text-align: center; color: #2b6cb0; }",
-".matchup-vs { font-style: italic; color: #666; }",
-".matchup-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: #eee; }",
+".matchup-avatar { width: 48px; height: 48px; border-radius: 6px; border: 1px solid #ccc; object-fit: cover; }",
+".matchup-team-name { margin-top: 6px; font-weight: 600; text-align: center; color: #2b6cb0; font-size: 13px; }",
+".matchup-owner-name { font-size: 11px; text-align: center; color: #666; }",
+".matchup-vs { font-style: italic; color: #666; font-size: 12px; }",
+".matchup-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #eee; }",
 ".matchup-bar-win { background: #2ecc40; }",
 ".matchup-bar-loss { background: #e74c3c; }",
-".matchup-pcts { display: flex; justify-content: space-between; margin-top: 6px; font-weight: 600; color: #a0522d; }",
+".matchup-pcts { display: flex; justify-content: space-between; margin-top: 4px; font-weight: 600; font-size: 13px; color: #a0522d; }",
 sep = "\n"
 )))),
 titlePanel("ΑΔΓ Redraft League"),
@@ -588,10 +592,15 @@ paste("No weekly matchup simulation yet -- runs weekly alongside the",
 
 ids <- identity()
 avatar_by_owner <- setNames(ids$avatar_url, ids$owner)
+team_name_by_owner <- setNames(ids$team_name, ids$owner)
 default_avatar <- "https://sleepercdn.com/images/v2/icons/league/league_avatar_mint.png"
 avatar_for <- function(owner) {
 a <- unname(avatar_by_owner[owner])
 ifelse(is.na(a) | a == "", default_avatar, a)
+}
+team_name_for <- function(owner) {
+tn <- unname(team_name_by_owner[owner])
+ifelse(is.na(tn) | tn == "", owner, tn)
 }
 
 cards <- lapply(seq_len(nrow(d)), function(i) {
@@ -602,11 +611,13 @@ div(class = "matchup-card",
 div(class = "matchup-teams",
 div(class = "matchup-team",
 tags$img(src = avatar_for(row$Team), class = "matchup-avatar"),
-div(class = "matchup-name", row$Team)),
+div(class = "matchup-team-name", team_name_for(row$Team)),
+div(class = "matchup-owner-name", row$Team)),
 div(class = "matchup-vs", "Vs."),
 div(class = "matchup-team",
 tags$img(src = avatar_for(row$Opponent), class = "matchup-avatar"),
-div(class = "matchup-name", row$Opponent))),
+div(class = "matchup-team-name", team_name_for(row$Opponent)),
+div(class = "matchup-owner-name", row$Opponent))),
 div(class = "matchup-bar",
 div(class = "matchup-bar-fill matchup-bar-win",
 style = paste0("width: ", team_pct, "%;")),
@@ -617,8 +628,8 @@ span(paste0(team_pct, "%")), span(paste0(opp_pct, "%"))))
 })
 
 tagList(
-h4(paste("Week", d$week[1], "Matchup Odds")),
-cards
+h4("Current Week Matchup Odds"),
+div(class = "matchup-container", cards)
 )
 })
 
