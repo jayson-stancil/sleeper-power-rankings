@@ -126,9 +126,9 @@ options(nflreadr.cache = "filesystem")
 # season               NFL season as an integer, e.g. 2026
 # roster_id_to_owner   Named vector/list: as.character(roster_id) -> owner
 # n_seasons            Number of seasons to simulate (default 250)
-# n_weeks              Regular-season length for this league (default 14,
-#                       matches this app's Weeks 1-14 convention). Used only
-#                       to know how many weeks the regular season has, NOT
+# n_weeks              Fallback regular-season length (default 14), used
+#                       only if Sleeper's playoff_week_start is missing.
+#                       Defines the regular season's length, NOT
 #                       as the number of weeks actually simulated -- that is
 #                       always just the weeks that haven't happened yet.
 # seed                 Fixed for reproducible week-to-week comparisons
@@ -156,6 +156,11 @@ run_ff_simulation <- function(league_id, season, roster_id_to_owner,
   # the live power rankings always agree on "what's already happened").
   league <- sleeper(paste0("league/", league_id))
   state  <- sleeper("state/nfl")
+  # Regular-season length comes from Sleeper (playoff_week_start - 1), the
+  # same source run_power_rankings() uses; n_weeks is only a fallback for
+  # a league object that lacks the setting.
+  pws <- suppressWarnings(as.integer(league$settings$playoff_week_start))
+  if (length(pws) == 1 && !is.na(pws) && pws > 1) n_weeks <- pws - 1L
   reg_season_weeks <- seq_len(n_weeks)
 
   if (identical(state$season, league$season) &&

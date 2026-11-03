@@ -214,25 +214,6 @@ data.frame(sleeper_id = as.character(d$player$sleeperId),
 value = d$value, stringsAsFactors = FALSE)
 }
 
-# Sums FantasyCalc player value per Sleeper roster. Returns a data.frame
-# (roster_id, total_value) ordered by roster_id, suitable for passing (after
-# extracting $total_value) as run_power_rankings()'s roster_scores argument.
-# is_dynasty/ppr should match the league's format; ppr = 1 for full PPR.
-compute_roster_scores <- function(league_id, is_dynasty = FALSE, ppr = 1) {
-rosters <- sleeper(paste0("league/", league_id, "/rosters"))
-fc <- fetch_fantasycalc_values(is_dynasty = is_dynasty, num_qbs = 1,
-num_teams = nrow(rosters), ppr = ppr)
-if (is.null(fc)) return(NULL)
-val_by_id <- setNames(fc$value, fc$sleeper_id)
-totals <- vapply(rosters$players, function(pids) {
-if (is.null(pids) || !length(pids)) return(0)
-v <- val_by_id[as.character(pids)]
-sum(v, na.rm = TRUE)
-}, numeric(1))
-data.frame(roster_id = rosters$roster_id, total_value = totals,
-stringsAsFactors = FALSE)[order(rosters$roster_id), ]
-}
-
 # --------------------------- TRANSACTIONS --------------------------------------
 # Season transaction log: adds/drops (waiver or free agency) and trades --
 # including traded draft picks, which Sleeper reports in a transaction's
@@ -315,49 +296,6 @@ stringsAsFactors = FALSE))
 }
 out <- do.call(rbind, rows)
 out[order(out$Date, decreasing = TRUE), ]
-}
-
-# Full transaction history across every season: walks the league chain via
-# previous_league_id (same mechanism as fetch_league_history()) and calls
-# fetch_league_transactions() once per season, tagging each season's rows.
-# Each season gets its own roster_id -> owner mapping since rosters reshuffle
-# between seasons, so owner_map (not a single teams table) is passed through
-# and resolved fresh per season. Limited to Sleeper-hosted seasons (no
-# transaction data exists for earlier, pre-Sleeper years).
-#
-# league_id Sleeper league ID for the CURRENT season (chain walks backward)
-# weeks Integer vector of rounds to check per season, e.g. 0:18
-# players_ref fetch_sleeper_players() output, for player_id -> name
-# owner_map Optional data.frame(user_id, owner); NULL -> Sleeper display
-# names, resolved per season
-fetch_league_transactions_history <- function(league_id, weeks, players_ref,
-owner_map = NULL) {
-chain <- fetch_league_chain(league_id)
-rows <- list()
-
-for (lg in chain) {
-season_rows <- tryCatch({
-users <- sleeper(paste0("league/", lg$league_id, "/users"))
-rosters <- sleeper(paste0("league/", lg$league_id, "/rosters"))
-teams <- suppressWarnings(build_team_table(users, rosters, owner_map))
-tx <- fetch_league_transactions(lg$league_id, weeks, players_ref, teams)
-if (nrow(tx)) tx$Season <- lg$season
-tx
-}, error = function(e) NULL)
-if (!is.null(season_rows) && nrow(season_rows)) {
-rows[[length(rows) + 1]] <- season_rows
-}
-}
-
-if (!length(rows)) {
-return(data.frame(Season = character(0), Date = character(0),
-Week = integer(0), Type = character(0),
-Team = character(0), Added = character(0),
-Dropped = character(0), stringsAsFactors = FALSE))
-}
-out <- do.call(rbind, rows)
-out <- out[, c("Season", "Date", "Week", "Type", "Team", "Added", "Dropped")]
-out[order(out$Season, out$Date, decreasing = TRUE), ]
 }
 
 # Incrementally caches per-season transaction CSVs to disk, one file per
@@ -580,7 +518,7 @@ data_row.padding = gt::px(6))
 }
 
 # gt table for the standalone "NFL Power Rankings" tab. tbl is one row per
-# NFL team from the separate nfl-power-rankings repo's data/current.csv
+# NFL team from the separate nfl_power_rankings repo's data/current.csv
 # (Rank, Team, ABBREV, Rating, Deviation, Volatility, Record, RankChange,
 # RatingChange, PreseasonRank, Week, WeekLabel); teams is that repo's
 # data/teams.csv (ABBREV, Team, Logo), or NULL before that repo's first
@@ -739,11 +677,10 @@ weekly_file = weekly_file, png_file = png_file))
 # preseason team); NULL -> all start at 1500
 # owner_map Optional data.frame(user_id, owner) of canonical names;
 # NULL -> Sleeper display names
-# through_week Optional cap on the last completed week (NULL = auto-detect)
 # make_graphic Set FALSE to skip PNG/PDF rendering
 run_power_rankings <- function(league_id, league_tag, season_label, base_dir,
 roster_scores = NULL, owner_map = NULL,
-through_week = NULL, make_graphic = TRUE) {
+make_graphic = TRUE) {
 
 weeks_dir <- file.path(base_dir, "Power Rankings", "Weeks 1-14")
 graphic_dir <- file.path(base_dir, "Power Rankings", "Graphics")
@@ -768,9 +705,6 @@ identical(state$season_type, "post")) {
 completed_weeks <- reg_season_weeks
 } else {
 completed_weeks <- integer(0)
-}
-if (!is.null(through_week)) {
-completed_weeks <- completed_weeks[completed_weeks <= through_week]
 }
 
 teams <- build_team_table(users, rosters, owner_map)
@@ -1020,8 +954,7 @@ totals <- history_seed$records
 totals$T <- 0
 totals <- finalize_totals(totals, champs_df)
 }
-return(list(champions = champs_df, totals = totals, h2h = NULL,
-long = NULL))
+return(list(champions = champs_df, totals = totals, long = NULL))
 }
 long <- do.call(rbind, long_all)
 owners <- sort(unique(long$owner))
@@ -1057,20 +990,5 @@ totals <- m[, c("Owner", "Seasons", "W", "L", "T", "PF", "PA")]
 }
 totals <- finalize_totals(totals, champs_df)
 
-# ---- Head-to-head matrix (W-L from the row owner's perspective)
-h2h <- matrix("—", length(owners), length(owners),
-dimnames = list(owners, owners))
-for (i in owners) {
-for (j in owners) {
-if (i == j) next
-sub <- long[long$owner == i & long$opponent == j, , drop = FALSE]
-if (!nrow(sub)) next
-ties <- sum(sub$win == 0.5)
-h2h[i, j] <- paste0(sum(sub$win == 1), "-", sum(sub$win == 0),
-if (ties > 0) paste0("-", ties) else "")
-}
-}
-h2h_df <- data.frame(h2h, check.names = FALSE)
-
-list(champions = champs_df, totals = totals, h2h = h2h_df, long = long)
+list(champions = champs_df, totals = totals, long = long)
 }

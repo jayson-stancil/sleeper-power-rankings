@@ -33,7 +33,7 @@ names(leagues) <- vapply(leagues, `[[`, character(1), "league_tag")
 
 # ---- GitHub data access (raw URL first for freshness, local bundle fallback)
 # user/repo/branch default to this app's own repo; the NFL Power Rankings
-# tab passes the nfl-power-rankings repo's constants instead via
+# tab passes the nfl_power_rankings repo's constants instead via
 # read_nfl_csv() below -- same reader, different source repo.
 raw_url <- function(path, user = GH_USER, repo = GH_REPO, branch = GH_BRANCH) {
 paste0("https://raw.githubusercontent.com/", user, "/", repo, "/",
@@ -216,11 +216,10 @@ selectInput("roster_owner", "Team:", choices = NULL),
 radioButtons("roster_view", "View:",
 choices = c("Table", "Composition Chart"),
 selected = "Table", inline = TRUE),
+uiOutput("roster_values_ui"),
 conditionalPanel(
 "input.roster_view == 'Table'",
-helpText("Player values are FantasyCalc redraft prices",
-"(NA for unpriced players, e.g. K/DEF). Grouped by",
-"position; TOTAL roster value is in the source note."),
+uiOutput("roster_values_help"),
 gt_output("roster_table")
 ),
 conditionalPanel(
@@ -255,7 +254,7 @@ selected = "Current Week Power Rankings"),
 helpText("All 32 NFL teams, Glicko-2 ratings seeded by a preseason",
 "media consensus. Computed independently of this league",
 "and updated weekly -- see github.com/jayson-stancil/",
-"nfl-power-rankings."),
+"nfl_power_rankings."),
 conditionalPanel(
 "input.nfl_view == 'Current Week Power Rankings'",
 div(class = "nfl-rank-table-wrap", gt_output("nfl_rank_table"))
@@ -329,18 +328,6 @@ paste0(c_$season_label, " ", c_$league_tag,
 " Week ", wk, " Power Rankings.csv")))
 }
 
-# Live FantasyCalc roster scores for the current league (NULL if disabled
-# or unreachable). Cached per session; used by both the Glicko-2 seed at
-# pipeline time (see run_all.R) and the Summary tab's ROST SCORE column.
-roster_scores_live <- reactive({
-c_ <- cfg()
-if (!identical(c_$roster_score_source, "fantasycalc")) return(NULL)
-tryCatch(
-compute_roster_scores(c_$league_id, is_dynasty = isTRUE(c_$is_dynasty),
-ppr = if (is.null(c_$ppr)) 1 else c_$ppr),
-error = function(e) NULL)
-})
-
 # ---- Rosters & Transactions -----------------------------------------------
 # Lazy: neither fetches until its tab is actually opened.
 
@@ -354,12 +341,32 @@ updateSelectInput(session, "roster_owner", choices = owners,
 selected = owners[1])
 })
 
+# Dynasty leagues get a Redraft/Dynasty value toggle (default Dynasty);
+# the redraft league always uses redraft values and shows no toggle.
+output$roster_values_ui <- renderUI({
+if (!isTRUE(cfg()$is_dynasty)) return(NULL)
+radioButtons("roster_values", "Player values:",
+choices = c("Dynasty", "Redraft"), selected = "Dynasty",
+inline = TRUE)
+})
+
+roster_use_dynasty <- reactive({
+isTRUE(cfg()$is_dynasty) && !identical(input$roster_values, "Redraft")
+})
+
+output$roster_values_help <- renderUI({
+helpText(paste0("Player values are FantasyCalc ",
+if (roster_use_dynasty()) "dynasty" else "redraft",
+" values (NA for unpriced players, e.g. K/DEF). Grouped by ",
+"position; TOTAL roster value is in the source note."))
+})
+
 roster_details <- reactive({
 req(input$main_tabs == "Rosters")
 c_ <- cfg()
 rosters <- sleeper(paste0("league/", c_$league_id, "/rosters"))
 build_roster_details(rosters, identity(), players_ref(),
-is_dynasty = isTRUE(c_$is_dynasty),
+is_dynasty = roster_use_dynasty(),
 ppr = if (is.null(c_$ppr)) 1 else c_$ppr)
 })
 
@@ -505,14 +512,6 @@ d <- sim_data()$summary
 shiny::validate(shiny::need(!is.null(d), paste("No simulation data yet -- runs",
 "weekly alongside the rankings.")))
 
-# total_games (regular-season games the W-L record below is out of) was
-# added alongside this column; fall back to a win%-derived estimate for
-# any cached CSV written before that change, until next week's run
-# refreshes it.
-if (!"total_games" %in% names(d)) {
-d$total_games <- ifelse(d$h2h_winpct > 0,
-round(d$h2h_wins / d$h2h_winpct), NA_integer_)
-}
 wins <- round(d$h2h_wins)
 losses <- d$total_games - wins
 record <- ifelse(is.na(losses), "--", paste0(wins, "-", losses))
@@ -549,7 +548,7 @@ theme(panel.grid.minor = element_blank())
 })
 
 # ---- NFL Power Rankings --------------------------------------------------
-# Reads the separate nfl-power-rankings repo's data/ CSVs directly (via
+# Reads the separate nfl_power_rankings repo's data/ CSVs directly (via
 # read_nfl_csv() -- same reader as read_repo_csv(), pointed at NFL_GH_*
 # instead of this app's own GH_*). Not computed here, not league-specific,
 # shared identically by all three league apps.
@@ -686,14 +685,9 @@ out <- data.frame(Team = latest$Player, WINS = as.integer(latest$Win),
 stringsAsFactors = FALSE)
 out$`WINS RANK` <- rank(-out$WINS, ties.method = "min")
 
-# ROST SCORE: rank 1-16 by summed roster value (live FantasyCalc, or the
-# manual roster_scores vector as a fallback; NA if neither is available).
-rs <- roster_scores_live()
-if (!is.null(rs)) {
-rs$Owner <- id_to_owner[as.character(rs$roster_id)]
-out$`ROST SCORE` <- as.integer(
-rank(-rs$total_value[match(out$Team, rs$Owner)], ties.method = "min"))
-} else if (!is.null(c_$roster_scores)) {
+# ROST SCORE: rank 1..n_teams by the config's manual roster_scores
+# vector (higher = stronger); NA if no vector is configured.
+if (!is.null(c_$roster_scores)) {
 rid <- ids$roster_id[match(out$Team, ids$owner)]
 rs_vec <- c_$roster_scores[match(rid, sort(unique(ids$roster_id)))]
 out$`ROST SCORE` <- as.integer(rank(-rs_vec, ties.method = "min"))
