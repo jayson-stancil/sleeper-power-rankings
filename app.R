@@ -151,6 +151,18 @@ tags$head(tags$style(HTML(paste(
 ".nfl-rank-table-wrap tbody td:nth-child(6):before { content: \"\\0394 Rating: \"; font-weight: 600; color: #666; }",
 ".nfl-rank-table-wrap tbody td:nth-child(7):before { content: \"Record: \"; font-weight: 600; color: #666; }",
 "}",
+# Week Matchups sub-tab (Simulated Seasons): one card per matchup, each
+# with the two teams' avatars and a two-color win-probability bar.
+".matchup-card { border: 1px solid #ddd; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }",
+".matchup-teams { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }",
+".matchup-team { display: flex; flex-direction: column; align-items: center; width: 40%; }",
+".matchup-avatar { width: 64px; height: 64px; border-radius: 6px; border: 1px solid #ccc; object-fit: cover; }",
+".matchup-name { margin-top: 6px; font-weight: 600; text-align: center; color: #2b6cb0; }",
+".matchup-vs { font-style: italic; color: #666; }",
+".matchup-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: #eee; }",
+".matchup-bar-win { background: #2ecc40; }",
+".matchup-bar-loss { background: #e74c3c; }",
+".matchup-pcts { display: flex; justify-content: space-between; margin-top: 6px; font-weight: 600; color: #a0522d; }",
 sep = "\n"
 )))),
 titlePanel("ΑΔΓ Redraft League"),
@@ -239,6 +251,9 @@ helpText("All adds/drops and trades for the selected season",
 DT::dataTableOutput("transactions_table")
 ),
 tabPanel("Simulated Seasons",
+tabsetPanel(
+id = "sim_subtab",
+tabPanel("Season Odds",
 helpText("Monte Carlo season simulations (ffsimulator):",
 "what a season with these rosters could look like",
 "if replayed hundreds of times. Computed weekly",
@@ -246,6 +261,15 @@ helpText("Monte Carlo season simulations (ffsimulator):",
 tableOutput("sim_summary_table"),
 h4("Distribution of Simulated Final Standings"),
 plotOutput("sim_rank_plot", height = "500px")
+),
+tabPanel("Week Matchups",
+helpText("Win probability for each of next week's matchups,",
+"from ffsimulator's weekly simulation of the real",
+"schedule. Computed weekly alongside the rankings,",
+"not live in this app."),
+uiOutput("week_matchups_ui")
+)
+)
 ),
 tabPanel("NFL Power Rankings",
 selectInput("nfl_view", "View:",
@@ -545,6 +569,57 @@ scale_x_continuous(breaks = seq_len(n_owners)) +
 labs(x = "Simulated final standing (1 = best)", y = NULL) +
 theme_minimal(base_size = 14) +
 theme(panel.grid.minor = element_blank())
+})
+
+# Next unplayed week's matchup win probabilities (R/simulate.R's
+# run_ff_simulation_week(), via ffsimulator::ff_simulate_week()). Reads one
+# small CSV, same pattern as sim_data() above.
+week_sim_data <- reactive({
+req(input$main_tabs == "Simulated Seasons")
+c_ <- cfg()
+read_repo_csv(file.path(c_$data_dir, "Simulation", "week_matchups.csv"))
+})
+
+output$week_matchups_ui <- renderUI({
+d <- week_sim_data()
+shiny::validate(shiny::need(!is.null(d) && nrow(d) > 0,
+paste("No weekly matchup simulation yet -- runs weekly alongside the",
+"rankings, or the regular season is complete.")))
+
+ids <- identity()
+avatar_by_owner <- setNames(ids$avatar_url, ids$owner)
+default_avatar <- "https://sleepercdn.com/images/v2/icons/league/league_avatar_mint.png"
+avatar_for <- function(owner) {
+a <- unname(avatar_by_owner[owner])
+ifelse(is.na(a) | a == "", default_avatar, a)
+}
+
+cards <- lapply(seq_len(nrow(d)), function(i) {
+row <- d[i, ]
+team_pct <- round(row$team_win_pct * 100)
+opp_pct <- round(row$opponent_win_pct * 100)
+div(class = "matchup-card",
+div(class = "matchup-teams",
+div(class = "matchup-team",
+tags$img(src = avatar_for(row$Team), class = "matchup-avatar"),
+div(class = "matchup-name", row$Team)),
+div(class = "matchup-vs", "Vs."),
+div(class = "matchup-team",
+tags$img(src = avatar_for(row$Opponent), class = "matchup-avatar"),
+div(class = "matchup-name", row$Opponent))),
+div(class = "matchup-bar",
+div(class = "matchup-bar-fill matchup-bar-win",
+style = paste0("width: ", team_pct, "%;")),
+div(class = "matchup-bar-fill matchup-bar-loss",
+style = paste0("width: ", opp_pct, "%;"))),
+div(class = "matchup-pcts",
+span(paste0(team_pct, "%")), span(paste0(opp_pct, "%"))))
+})
+
+tagList(
+h4(paste("Week", d$week[1], "Matchup Odds")),
+cards
+)
 })
 
 # ---- NFL Power Rankings --------------------------------------------------

@@ -287,9 +287,89 @@ run_ff_simulation <- function(league_id, season, roster_id_to_owner,
       n_weeks = length(remaining_weeks), run_date = as.character(Sys.Date()))
 }
 
-# Runs run_ff_simulation() for one league config and writes its CSVs.
-# Wrapped in tryCatch by the caller (run_all.R) so a simulation failure never
-# blocks the rest of the weekly pipeline.
+# --------------------------- WEEKLY MATCHUP SIMULATION -----------------------
+# Simulates the next unplayed regular-season week with ffsimulator's
+# ff_simulate_week(actual_schedule = TRUE), which pulls the REAL matchup
+# pairings for that week (unlike run_ff_simulation() above, whose simulated
+# remaining weeks use a random schedule -- see the note at the top of this
+# file). Returns one row per matchup (not per team), each side's win
+# probability being the share of the n simulated instances of that single
+# week it won (a tied simulated score counts as half a win for each side).
+# NULL if the regular season has no unplayed week left, or if
+# ff_simulate_week() errors.
+#
+# ASSUMPTION NOT YET CONFIRMED LOCALLY (see the file-level assumptions list
+# above): ff_simulate_week()'s own "first unplayed week" detection agrees
+# with run_power_rankings()'s completed_weeks logic in engine.R. Both read
+# from Sleeper, so they should agree once a week's games are final, but this
+# hasn't been checked against a live run.
+#
+# league_id            Sleeper league ID (string)
+# season               NFL season as an integer, e.g. 2026
+# roster_id_to_owner   Named vector/list: as.character(roster_id) -> owner
+# n_seasons            Number of simulated instances of the week
+# seed                 Fixed for reproducible week-to-week comparisons
+run_ff_simulation_week <- function(league_id, season, roster_id_to_owner,
+                                   n_seasons = 250, seed = 42) {
+  conn <- ffsimulator::sleeper_connect(season = season, league_id = league_id)
+
+  sim <- tryCatch(
+    ffsimulator::ff_simulate_week(conn, n = n_seasons, seed = seed,
+                                  actual_schedule = TRUE, verbose = FALSE),
+    error = function(e) {
+      message("ff_simulate_week failed: ", conditionMessage(e))
+      NULL
+    })
+
+  if (is.null(sim) || is.null(sim$summary_week) || !nrow(sim$summary_week)) {
+    return(NULL) # no unplayed week left in the regular season
+  }
+
+  sw <- as.data.frame(sim$summary_week)
+  sw$result <- as.character(sw$result)
+  sw$roster_id <- as.integer(sw$franchise_id)
+
+  # opponent_id is dropped from summary_week's output; recover each row's
+  # opponent roster_id via its (unique) franchise_name instead.
+  name_to_roster <- setNames(sw$roster_id, sw$franchise_name)
+  sw$opponent_roster_id <- unname(name_to_roster[sw$opponent_name])
+
+  win_pct <- function(x) mean(x == "W") + 0.5 * mean(x == "T")
+  agg <- aggregate(result ~ roster_id + opponent_roster_id, sw, win_pct)
+  names(agg)[names(agg) == "result"] <- "win_pct"
+
+  agg$Owner <- unname(roster_id_to_owner[as.character(agg$roster_id)])
+  agg$Opponent <-
+    unname(roster_id_to_owner[as.character(agg$opponent_roster_id)])
+  if (any(is.na(agg$Owner) | is.na(agg$Opponent))) {
+    warning("ff_simulate_week: could not map some franchise_id values to a ",
+            "Sleeper roster_id/owner -- compare summary_week's ",
+            "franchise_name column against the league roster before ",
+            "trusting these results.")
+  }
+
+  wp_by_roster <- setNames(agg$win_pct, agg$roster_id)
+
+  # One row per matchup: keep the lower-roster_id side's perspective (same
+  # convention build_matchups() uses) and look up its opponent's win_pct.
+  out <- agg[agg$roster_id < agg$opponent_roster_id, ]
+  data.frame(
+    week               = sw$week[1],
+    team_roster_id     = out$roster_id,
+    Team               = out$Owner,
+    team_win_pct       = round(out$win_pct, 4),
+    opponent_roster_id = out$opponent_roster_id,
+    Opponent           = out$Opponent,
+    opponent_win_pct   = round(
+      unname(wp_by_roster[as.character(out$opponent_roster_id)]), 4),
+    stringsAsFactors   = FALSE
+  )
+}
+
+# Runs run_ff_simulation() and run_ff_simulation_week() for one league
+# config and writes their CSVs. Wrapped in tryCatch by the caller
+# (run_all.R) so a simulation failure never blocks the rest of the weekly
+# pipeline.
 write_ff_simulation <- function(cfg) {
   users   <- sleeper(paste0("league/", cfg$league_id, "/users"))
   rosters <- sleeper(paste0("league/", cfg$league_id, "/rosters"))
@@ -319,5 +399,32 @@ write_ff_simulation <- function(cfg) {
             file.path(sim_dir, "meta.csv"))
   message("Simulation complete: ", sim$n_seasons, " seasons written to ",
           sim_dir)
+
+  # ---- Weekly matchup simulation (next unplayed week only). Independent of
+  # the season simulation above; failure here is non-fatal and never blocks
+  # the season CSVs already written.
+  week_sim <- tryCatch(
+    run_ff_simulation_week(
+      league_id          = cfg$league_id,
+      season             = sim_season,
+      roster_id_to_owner = id_to_owner,
+      n_seasons          = if (is.null(cfg$sim_n_seasons)) 250
+                           else cfg$sim_n_seasons
+    ),
+    error = function(e) {
+      message("Weekly matchup simulation skipped for ", cfg$league_tag, ": ",
+              conditionMessage(e))
+      NULL
+    })
+  if (!is.null(week_sim)) {
+    write.csv(week_sim, file.path(sim_dir, "week_matchups.csv"),
+              row.names = FALSE)
+    message("Weekly matchup simulation complete: Week ", week_sim$week[1],
+            " written to ", sim_dir)
+  } else {
+    message("No upcoming week to simulate for ", cfg$league_tag,
+            " (regular season complete, or simulation unavailable).")
+  }
+
   invisible(sim)
 }
