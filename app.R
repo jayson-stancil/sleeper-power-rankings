@@ -607,6 +607,10 @@ cards <- lapply(seq_len(nrow(d)), function(i) {
 row <- d[i, ]
 team_pct <- round(row$team_win_pct * 100)
 opp_pct <- round(row$opponent_win_pct * 100)
+# Favored side (higher win%) is green; the other is red, whichever
+# position it's in.
+team_bar_class <- if (team_pct >= opp_pct) "matchup-bar-win" else "matchup-bar-loss"
+opp_bar_class <- if (team_pct >= opp_pct) "matchup-bar-loss" else "matchup-bar-win"
 div(class = "matchup-card",
 div(class = "matchup-teams",
 div(class = "matchup-team",
@@ -619,9 +623,9 @@ tags$img(src = avatar_for(row$Opponent), class = "matchup-avatar"),
 div(class = "matchup-team-name", team_name_for(row$Opponent)),
 div(class = "matchup-owner-name", row$Opponent))),
 div(class = "matchup-bar",
-div(class = "matchup-bar-fill matchup-bar-win",
+div(class = paste("matchup-bar-fill", team_bar_class),
 style = paste0("width: ", team_pct, "%;")),
-div(class = "matchup-bar-fill matchup-bar-loss",
+div(class = paste("matchup-bar-fill", opp_bar_class),
 style = paste0("width: ", opp_pct, "%;"))),
 div(class = "matchup-pcts",
 span(paste0(team_pct, "%")), span(paste0(opp_pct, "%"))))
