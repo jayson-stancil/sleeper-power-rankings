@@ -352,6 +352,132 @@ message("Transactions cached: ", out_file, " (", nrow(season_tx),
 invisible(NULL)
 }
 
+# --------------------------- PLAYER SEASON STATS --------------------------------
+# Per-player, per-team-stint season totals, feeding the "Fantasy Stats by
+# Year" table on a player's card (Rosters tab). A player traded mid-season
+# gets one row per roster they were on, not one row for the whole season --
+# points are attributed to whichever roster_id actually rostered them that
+# week, win or bench. Weekly matchup data (not the season simulation, which
+# is projections) is the only source with per-player, per-week points.
+
+# league_id Sleeper league ID for this season
+# weeks Integer vector of REGULAR SEASON weeks only (no playoffs) --
+# matches run_ff_simulation()'s playoff_week_start convention
+# teams build_team_table() output for this season, for roster_id -> Team/
+# Manager
+# players_ref fetch_sleeper_players() output, for player_id -> name/position
+fetch_player_season_stats <- function(league_id, weeks, teams, players_ref) {
+team_name_by_roster <- setNames(teams$team_name, teams$roster_id)
+owner_by_roster <- setNames(teams$owner, teams$roster_id)
+
+empty <- data.frame(player_id = character(0), Player = character(0),
+Position = character(0), roster_id = integer(0),
+Team = character(0), Manager = character(0),
+Weeks = integer(0), TotalPoints = numeric(0),
+PPG = numeric(0), stringsAsFactors = FALSE)
+
+rows <- list()
+for (wk in weeks) {
+mu <- tryCatch(sleeper_raw(paste0("league/", league_id, "/matchups/", wk)),
+error = function(e) NULL)
+if (!length(mu)) next
+for (m in mu) {
+rid <- suppressWarnings(as.integer(m$roster_id))
+pts <- m$players_points
+if (is.na(rid) || !length(pts)) next
+for (pid in names(pts)) {
+p <- pts[[pid]]
+if (is.null(p) || !is.numeric(p)) next
+rows[[length(rows) + 1]] <- data.frame(
+player_id = pid, roster_id = rid, points = p,
+stringsAsFactors = FALSE)
+}
+}
+}
+if (!length(rows)) return(empty)
+
+long <- do.call(rbind, rows)
+sum_pts <- aggregate(points ~ player_id + roster_id, long, sum)
+n_wks <- aggregate(points ~ player_id + roster_id, long, length)
+names(sum_pts)[names(sum_pts) == "points"] <- "TotalPoints"
+names(n_wks)[names(n_wks) == "points"] <- "Weeks"
+out <- merge(sum_pts, n_wks, by = c("player_id", "roster_id"))
+out$TotalPoints <- round(out$TotalPoints, 2)
+out$PPG <- round(out$TotalPoints / out$Weeks, 2)
+
+out$Player <- vapply(out$player_id, player_full_name, character(1),
+players_ref = players_ref)
+out$Position <- vapply(out$player_id, function(pid) {
+p <- players_ref[[pid]]
+if (!is.null(p$position)) p$position else NA_character_
+}, character(1))
+out$Team <- unname(team_name_by_roster[as.character(out$roster_id)])
+out$Manager <- unname(owner_by_roster[as.character(out$roster_id)])
+
+out <- out[, c("player_id", "Player", "Position", "roster_id", "Team",
+"Manager", "Weeks", "TotalPoints", "PPG")]
+out[order(out$player_id, out$roster_id), ]
+}
+
+# Incrementally caches per-season player stats CSVs to disk, one file per
+# season under <base_dir>/PlayerStats/<season>.csv -- mirrors
+# update_transactions_cache()'s immutable-once-cached convention: a
+# completed season is fetched once and never refetched, only the current
+# season is always refreshed.
+#
+# league_id Sleeper league ID for the CURRENT season (chain walks backward)
+# players_ref fetch_sleeper_players() output, for player_id -> name/position
+# owner_map Optional data.frame(user_id, owner); NULL -> Sleeper display
+# names, resolved per season
+# base_dir League's data_dir; CSVs written beneath <base_dir>/PlayerStats
+update_player_stats_cache <- function(league_id, players_ref,
+owner_map = NULL, base_dir) {
+chain <- fetch_league_chain(league_id)
+if (!length(chain)) {
+message("No seasons found for league ", league_id, "; nothing to cache.")
+return(invisible(NULL))
+}
+
+stats_dir <- file.path(base_dir, "PlayerStats")
+if (!dir.exists(stats_dir)) dir.create(stats_dir, recursive = TRUE)
+
+for (i in seq_along(chain)) {
+lg <- chain[[i]]
+is_current_season <- (i == 1)
+out_file <- file.path(stats_dir, paste0(lg$season, ".csv"))
+
+if (!is_current_season && file.exists(out_file)) {
+next # completed season already cached; immutable, skip
+}
+
+season_stats <- tryCatch({
+# Regular-season length from Sleeper, same convention as
+# run_ff_simulation()'s B1 fix -- excludes playoff weeks. Falls back
+# to 1:17 only if this season's league object lacks the setting.
+pws <- suppressWarnings(as.integer(lg$settings$playoff_week_start))
+weeks <- if (length(pws) == 1 && !is.na(pws) && pws > 1) seq_len(pws - 1L)
+else 1:17
+users <- sleeper(paste0("league/", lg$league_id, "/users"))
+rosters <- sleeper(paste0("league/", lg$league_id, "/rosters"))
+teams <- suppressWarnings(build_team_table(users, rosters, owner_map))
+fetch_player_season_stats(lg$league_id, weeks, teams, players_ref)
+}, error = function(e) {
+message("Skipped player stats for season ", lg$season, ": ",
+conditionMessage(e))
+NULL
+})
+
+if (is.null(season_stats)) next
+season_stats$season <- lg$season
+write.csv(season_stats, out_file, row.names = FALSE)
+message("Player stats cached: ", out_file, " (", nrow(season_stats),
+" rows)")
+}
+
+invisible(NULL)
+}
+
+
 # --------------------------- ROSTER DETAILS -------------------------------------
 # Full roster listing per team: player name/position/NFL team (from Sleeper's
 # players/nfl reference) and FantasyCalc value (NA for unpriced players, e.g.

@@ -45,6 +45,15 @@ error = function(e) message("Transaction cache skipped for ",
 cfg$league_tag, ": ", conditionMessage(e))
 )
 
+# ---- Player season stats cache -- incremental, non-fatal on failure.
+# Feeds the "Fantasy Stats by Year" table on a player's card (Rosters tab).
+tryCatch(
+update_player_stats_cache(cfg$league_id, players_ref, cfg$owner_map,
+cfg$data_dir),
+error = function(e) message("Player stats cache skipped for ",
+cfg$league_tag, ": ", conditionMessage(e))
+)
+
 # ---- Season simulation (ffsimulator) -- opt-in, non-fatal on failure.
 if (isTRUE(cfg$enable_simulation)) {
 message("Running season simulation (ffsimulator) for ", cfg$league_tag,

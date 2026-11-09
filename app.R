@@ -90,6 +90,21 @@ else character(0)
 files[grepl("\\.csv$", files)]
 }
 
+# List cached per-season player stats CSVs: GitHub contents API (fresh),
+# local fallback. Mirrors list_transaction_files().
+list_player_stats_files <- function(cfg) {
+dir_path <- file.path(cfg$data_dir, "PlayerStats")
+api <- suppressWarnings(tryCatch(
+jsonlite::fromJSON(paste0("https://api.github.com/repos/", GH_USER, "/",
+GH_REPO, "/contents/",
+utils::URLencode(dir_path))),
+error = function(e) NULL))
+files <- if (!is.null(api) && !is.null(api$name)) api$name
+else if (dir.exists(dir_path)) list.files(dir_path)
+else character(0)
+files[grepl("\\.csv$", files)]
+}
+
 # ---- UI ---------------------------------------------------------------------
 ui <- fluidPage(
 # Rankings tab only: the gt table has 10 columns (avatars, team, owner,
@@ -167,6 +182,16 @@ tags$head(tags$style(HTML(paste(
 ".matchup-bar-win { background: #2ecc40; }",
 ".matchup-bar-loss { background: #e74c3c; }",
 ".matchup-pcts { display: flex; justify-content: space-between; margin-top: 4px; font-weight: 600; font-size: 13px; color: #a0522d; }",
+# Player card (Rosters tab: click a player's name) -- photo + bio on top,
+# a Year/Team/Manager/Points/PPG table below.
+".player-card-top { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 14px; }",
+".player-card-photo { width: 110px; height: 110px; border-radius: 8px; border: 1px solid #ccc; object-fit: cover; background: #f2f2f2; }",
+".player-card-info { flex: 1; }",
+".player-card-name { font-size: 18px; font-weight: 700; margin-bottom: 8px; }",
+".player-card-field { font-size: 13px; color: #444; margin-bottom: 4px; }",
+"table.player-card-stats { width: 100%; border-collapse: collapse; font-size: 13px; }",
+"table.player-card-stats th { text-align: left; border-bottom: 2px solid #ccc; padding: 4px 6px; }",
+"table.player-card-stats td { border-bottom: 1px solid #eee; padding: 4px 6px; }",
 sep = "\n"
 )))),
 titlePanel("ΑΔΓ Redraft League"),
@@ -428,13 +453,25 @@ sub$headshot[is_def] <- nt$Logo[match(def_abbrev, nt$ABBREV)]
 sub$Position <- as.character(sub$Position)
 total_value <- sum(sub$Value, na.rm = TRUE)
 
-gt::gt(sub[, c("Position", "headshot", "Player", "NFL", "Value")],
+# Player name -> clickable link opening that player's card (modal below).
+# Built as raw HTML before gt::gt() -- gt can't attach a per-row onclick to
+# a plain text column, so the link (with player_id baked in) is rendered
+# as its own column and injected via text_transform()+gt::html() instead.
+sub$Player_link <- sprintf(
+'<a href="#" onclick="Shiny.setInputValue(\'player_click\', \'%s\', {priority: \'event\'}); return false;">%s</a>',
+sub$player_id, htmltools::htmlEscape(sub$Player))
+
+gt::gt(sub[, c("Position", "headshot", "Player_link", "NFL", "Value")],
 groupname_col = "Position") |>
 gt::text_transform(
 locations = gt::cells_body(columns = "headshot"),
 fn = function(x) gt::web_image(x, height = 28)
 ) |>
-gt::cols_label(headshot = "", Player = "Player", NFL = "Team",
+gt::text_transform(
+locations = gt::cells_body(columns = "Player_link"),
+fn = function(x) lapply(x, gt::html)
+) |>
+gt::cols_label(headshot = "", Player_link = "Player", NFL = "Team",
 Value = "Value") |>
 gt::fmt_number(columns = "Value", decimals = 0) |>
 gt::sub_missing(columns = "Value", missing_text = "—") |>
@@ -478,6 +515,97 @@ title = paste0(me, " -- Value by Position")) +
 theme_minimal(base_size = 14) +
 theme(plot.title = element_text(face = "bold", size = 15),
 plot.margin = margin(5, 30, 5, 5))
+})
+
+# ---- Player card (Rosters tab: click a player's name) ---------------------
+
+# All cached seasons' player stats combined, read once per session the
+# first time a card is opened (not refetched per click).
+player_stats_all <- reactive({
+files <- list_player_stats_files(cfg())
+if (!length(files)) return(NULL)
+parts <- lapply(files, function(f)
+read_repo_csv(file.path(cfg()$data_dir, "PlayerStats", f)))
+parts <- Filter(function(d) !is.null(d) && nrow(d) > 0, parts)
+if (!length(parts)) return(NULL)
+do.call(rbind, parts)
+})
+
+# Current rosters (who holds each player_id right now) -- independent of
+# the roster_owner filter the Rosters table itself uses.
+current_rosters <- reactive(
+sleeper(paste0("league/", cfg()$league_id, "/rosters")))
+
+observeEvent(input$player_click, {
+pid <- input$player_click
+pref <- players_ref()[[pid]]
+shiny::validate(shiny::need(!is.null(pref), "Unknown player."))
+
+player_name <- if (!is.null(pref$full_name) && nzchar(pref$full_name))
+pref$full_name else pid
+position <- if (!is.null(pref$position) && nzchar(pref$position))
+pref$position else NA_character_
+nfl_team <- if (!is.null(pref$team) && nzchar(pref$team)) pref$team else "FA"
+headshot <- paste0("https://sleepercdn.com/content/nfl/players/", pid, ".jpg")
+
+# Current fantasy team/manager: search this season's live rosters for
+# whoever has this player_id right now; NA if nobody does (free agent,
+# cut, or never rostered in this league).
+cr <- current_rosters()
+owner_rid <- NA_integer_
+if (!is.null(cr) && !is.null(cr$players)) {
+has_pid <- vapply(cr$players, function(ps) pid %in% unlist(ps), logical(1))
+if (any(has_pid)) owner_rid <- cr$roster_id[which(has_pid)[1]]
+}
+idn <- identity()
+cur_team <- if (!is.na(owner_rid))
+idn$team_name[match(owner_rid, idn$roster_id)] else NA_character_
+cur_manager <- if (!is.na(owner_rid))
+idn$owner[match(owner_rid, idn$roster_id)] else NA_character_
+
+# Fantasy stats by year -- one row per team stint (a mid-season trade
+# gives that year two rows), most recent year first.
+psa <- player_stats_all()
+hist <- if (!is.null(psa)) psa[psa$player_id == pid, , drop = FALSE] else NULL
+if (!is.null(hist) && nrow(hist)) {
+hist <- hist[order(-as.integer(hist$season), hist$roster_id), ]
+}
+
+stats_ui <- if (is.null(hist) || !nrow(hist)) {
+tags$p("No recorded fantasy stats for this player in this league.")
+} else {
+tags$table(class = "player-card-stats",
+tags$tr(tags$th("Year"), tags$th("Fantasy Team"), tags$th("Manager"),
+tags$th("Total Pts"), tags$th("PPG")),
+lapply(seq_len(nrow(hist)), function(i) {
+r <- hist[i, ]
+tags$tr(tags$td(r$season), tags$td(r$Team), tags$td(r$Manager),
+tags$td(sprintf("%.1f", r$TotalPoints)),
+tags$td(sprintf("%.1f", r$PPG)))
+}))
+}
+
+showModal(modalDialog(
+title = NULL, easyClose = TRUE, size = "m",
+div(class = "player-card",
+div(class = "player-card-top",
+tags$img(src = headshot, class = "player-card-photo",
+onerror = paste0("this.onerror=null;this.src=",
+"'https://sleepercdn.com/images/v2/icons/player_default.webp';")),
+div(class = "player-card-info",
+div(class = "player-card-name",
+paste0(player_name,
+if (!is.na(position)) paste0(" - ", position) else "")),
+div(class = "player-card-field", paste("NFL Team:", nfl_team)),
+div(class = "player-card-field",
+paste("Fantasy Team:",
+if (!is.na(cur_team)) cur_team else "Free Agent / Not Rostered")),
+div(class = "player-card-field",
+paste("Manager:", if (!is.na(cur_manager)) cur_manager else "--"))
+)),
+tags$h4("Fantasy Stats by Year"),
+stats_ui)
+))
 })
 
 transaction_files <- reactive(list_transaction_files(cfg()))
