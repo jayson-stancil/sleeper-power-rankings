@@ -224,6 +224,15 @@ value = d$value, stringsAsFactors = FALSE)
 
 fetch_sleeper_players <- function() sleeper("players/nfl")
 
+# Shared by fetch_league_transactions() (adds/drops) and
+# fetch_player_season_stats() (per-player season totals) for
+# player_id -> display name.
+player_full_name <- function(pid, players_ref) {
+p <- players_ref[[as.character(pid)]]
+if (!is.null(p$full_name) && nzchar(p$full_name)) p$full_name
+else as.character(pid)
+}
+
 # league_id Sleeper league ID
 # weeks Integer vector of rounds to check, e.g. 0:18 (0 covers preseason
 # waiver activity; extra out-of-range rounds are silently skipped)
