@@ -455,8 +455,11 @@ total_value <- sum(sub$Value, na.rm = TRUE)
 
 # Player name -> clickable link opening that player's card (modal below).
 # Built as raw HTML before gt::gt() -- gt can't attach a per-row onclick to
-# a plain text column, so the link (with player_id baked in) is rendered
-# as its own column and injected via text_transform()+gt::html() instead.
+# a plain text column, so the link (with player_id baked in) is rendered as
+# its own column and run through gt::fmt_markdown(), which renders via
+# commonmark and passes inline HTML tags through unescaped. (An earlier
+# text_transform()+gt::html() version rendered the raw "<a href=...>" text
+# literally instead of as a link -- fmt_markdown is the more reliable path.)
 sub$Player_link <- sprintf(
 '<a href="#" onclick="Shiny.setInputValue(\'player_click\', \'%s\', {priority: \'event\'}); return false;">%s</a>',
 sub$player_id, htmltools::htmlEscape(sub$Player))
@@ -467,10 +470,7 @@ gt::text_transform(
 locations = gt::cells_body(columns = "headshot"),
 fn = function(x) gt::web_image(x, height = 28)
 ) |>
-gt::text_transform(
-locations = gt::cells_body(columns = "Player_link"),
-fn = function(x) lapply(x, gt::html)
-) |>
+gt::fmt_markdown(columns = "Player_link") |>
 gt::cols_label(headshot = "", Player_link = "Player", NFL = "Team",
 Value = "Value") |>
 gt::fmt_number(columns = "Value", decimals = 0) |>
