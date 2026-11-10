@@ -576,12 +576,14 @@ tags$p("No recorded fantasy stats for this player in this league.")
 } else {
 tags$table(class = "player-card-stats",
 tags$tr(tags$th("Year"), tags$th("Fantasy Team"), tags$th("Manager"),
-tags$th("Total Pts"), tags$th("PPG")),
+tags$th("Total Pts"), tags$th("PPG"), tags$th("Pos. Rank")),
 lapply(seq_len(nrow(hist)), function(i) {
 r <- hist[i, ]
 tags$tr(tags$td(r$season), tags$td(r$Team), tags$td(r$Manager),
 tags$td(sprintf("%.1f", r$TotalPoints)),
-tags$td(sprintf("%.1f", r$PPG)))
+tags$td(sprintf("%.1f", r$PPG)),
+tags$td(if (!is.null(r$PosRank) && !is.na(r$PosRank)) r$PosRank
+else "--"))
 }))
 }
 

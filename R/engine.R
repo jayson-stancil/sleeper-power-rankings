@@ -369,13 +369,60 @@ invisible(NULL)
 # week, win or bench. Weekly matchup data (not the season simulation, which
 # is projections) is the only source with per-player, per-week points.
 
+# Which (sleeper player_id, week) pairs a player actually took the field for,
+# sourced from nflverse's official box-score stats (play-by-play derived, so
+# a bye week or a missed game due to injury simply has no row -- unlike
+# Sleeper's own weekly matchup data, where a benched/inactive player still
+# shows up with 0 points, indistinguishable from a played-but-scoreless
+# game). Used so fetch_player_season_stats()'s PPG divides by true games
+# played, not weeks merely rostered. Returns NULL (caller falls back to a
+# nonzero-points heuristic) if nflreadr/the ID crosswalk can't be loaded --
+# e.g. offline, or the package isn't installed.
+#
+# season Season to look up (character or integer; coerced to integer)
+fetch_nflverse_played_weeks <- function(season) {
+tryCatch({
+ids <- nflreadr::load_ff_playerids()
+ids <- ids[!is.na(ids$sleeper_id) & nzchar(as.character(ids$sleeper_id)) &
+!is.na(ids$gsis_id) & nzchar(ids$gsis_id),
+c("sleeper_id", "gsis_id")]
+ids$sleeper_id <- as.character(ids$sleeper_id)
+
+stats <- nflreadr::load_player_stats(seasons = as.integer(season),
+stat_type = c("offense", "kicking"))
+played <- unique(stats[, c("player_id", "week")])
+names(played) <- c("gsis_id", "week")
+
+out <- merge(ids, played, by = "gsis_id")[, c("sleeper_id", "week")]
+if (!nrow(out)) NULL else out
+}, error = function(e) {
+message("nflverse played-weeks lookup skipped for season ", season, ": ",
+conditionMessage(e))
+NULL
+})
+}
+
+# Ranks x (higher is better, e.g. points) within each value of g, 1 = best;
+# ties share the lower rank number (ties.method = "min"). NA inputs stay NA
+# rather than being ranked. Helper for the Position Rank column below.
+rank_within_group <- function(x, g) {
+ave(x, g, FUN = function(v) {
+r <- rep(NA_integer_, length(v))
+ok <- !is.na(v)
+r[ok] <- rank(-v[ok], ties.method = "min")
+r
+})
+}
+
 # league_id Sleeper league ID for this season
 # weeks Integer vector of REGULAR SEASON weeks only (no playoffs) --
 # matches run_ff_simulation()'s playoff_week_start convention
 # teams build_team_table() output for this season, for roster_id -> Team/
 # Manager
 # players_ref fetch_sleeper_players() output, for player_id -> name/position
-fetch_player_season_stats <- function(league_id, weeks, teams, players_ref) {
+# season Season label (e.g. "2025"), for the nflverse games-played lookup
+fetch_player_season_stats <- function(league_id, weeks, teams, players_ref,
+season) {
 team_name_by_roster <- setNames(teams$team_name, teams$roster_id)
 owner_by_roster <- setNames(teams$owner, teams$roster_id)
 
@@ -383,7 +430,8 @@ empty <- data.frame(player_id = character(0), Player = character(0),
 Position = character(0), roster_id = integer(0),
 Team = character(0), Manager = character(0),
 Weeks = integer(0), TotalPoints = numeric(0),
-PPG = numeric(0), stringsAsFactors = FALSE)
+PPG = numeric(0), PosRank = character(0),
+stringsAsFactors = FALSE)
 
 rows <- list()
 for (wk in weeks) {
@@ -398,7 +446,7 @@ for (pid in names(pts)) {
 p <- pts[[pid]]
 if (is.null(p) || !is.numeric(p)) next
 rows[[length(rows) + 1]] <- data.frame(
-player_id = pid, roster_id = rid, points = p,
+player_id = pid, roster_id = rid, week = wk, points = p,
 stringsAsFactors = FALSE)
 }
 }
@@ -406,13 +454,30 @@ stringsAsFactors = FALSE)
 if (!length(rows)) return(empty)
 
 long <- do.call(rbind, rows)
+
+# "Games played" for PPG: nflverse's played-week lookup when a player maps
+# to a gsis_id (true games played, bye/injury weeks excluded); for players
+# nflverse doesn't track individually (team DEF, or any ID the crosswalk
+# missed), fall back to "scored nonzero points that week" as the
+# next-best played signal, rather than counting every rostered week.
+played_lookup <- fetch_nflverse_played_weeks(season)
+if (!is.null(played_lookup)) {
+key_long <- paste(long$player_id, long$week)
+key_played <- paste(played_lookup$sleeper_id, played_lookup$week)
+long$played <- key_long %in% key_played
+untracked <- !(long$player_id %in% played_lookup$sleeper_id)
+long$played[untracked] <- long$points[untracked] != 0
+} else {
+long$played <- long$points != 0
+}
+
 sum_pts <- aggregate(points ~ player_id + roster_id, long, sum)
-n_wks <- aggregate(points ~ player_id + roster_id, long, length)
+n_wks <- aggregate(played ~ player_id + roster_id, long, sum)
 names(sum_pts)[names(sum_pts) == "points"] <- "TotalPoints"
-names(n_wks)[names(n_wks) == "points"] <- "Weeks"
+names(n_wks)[names(n_wks) == "played"] <- "Weeks"
 out <- merge(sum_pts, n_wks, by = c("player_id", "roster_id"))
 out$TotalPoints <- round(out$TotalPoints, 2)
-out$PPG <- round(out$TotalPoints / out$Weeks, 2)
+out$PPG <- ifelse(out$Weeks > 0, round(out$TotalPoints / out$Weeks, 2), NA_real_)
 
 out$Player <- vapply(out$player_id, player_full_name, character(1),
 players_ref = players_ref)
@@ -423,8 +488,29 @@ if (!is.null(p$position)) p$position else NA_character_
 out$Team <- unname(team_name_by_roster[as.character(out$roster_id)])
 out$Manager <- unname(owner_by_roster[as.character(out$roster_id)])
 
+# Position Rank: "<rank by full-season Total Points> (<rank by full-season
+# PPG>)" among same-position players this season, 1 = best. A player traded
+# mid-season has two stint rows (one per team held) -- both show the SAME
+# rank, computed from the player's combined full-season total rather than
+# the partial-stint total, since a "position rank for the season" means
+# the whole season, not just one stint of it.
+season_tot <- aggregate(cbind(TotalPoints, Weeks) ~ player_id, out, sum)
+season_tot$SeasonPPG <- ifelse(season_tot$Weeks > 0,
+round(season_tot$TotalPoints / season_tot$Weeks, 2), NA_real_)
+season_tot <- merge(season_tot, unique(out[, c("player_id", "Position")]),
+by = "player_id")
+season_tot$PtsRank <- rank_within_group(season_tot$TotalPoints,
+season_tot$Position)
+season_tot$PPGRank <- rank_within_group(season_tot$SeasonPPG,
+season_tot$Position)
+season_tot$PosRank <- sprintf(
+"%s (%s)",
+ifelse(is.na(season_tot$PtsRank), "--", season_tot$PtsRank),
+ifelse(is.na(season_tot$PPGRank), "--", season_tot$PPGRank))
+out$PosRank <- season_tot$PosRank[match(out$player_id, season_tot$player_id)]
+
 out <- out[, c("player_id", "Player", "Position", "roster_id", "Team",
-"Manager", "Weeks", "TotalPoints", "PPG")]
+"Manager", "Weeks", "TotalPoints", "PPG", "PosRank")]
 out[order(out$player_id, out$roster_id), ]
 }
 
@@ -469,7 +555,8 @@ else 1:17
 users <- sleeper(paste0("league/", lg$league_id, "/users"))
 rosters <- sleeper(paste0("league/", lg$league_id, "/rosters"))
 teams <- suppressWarnings(build_team_table(users, rosters, owner_map))
-fetch_player_season_stats(lg$league_id, weeks, teams, players_ref)
+fetch_player_season_stats(lg$league_id, weeks, teams, players_ref,
+season = lg$season)
 }, error = function(e) {
 message("Skipped player stats for season ", lg$season, ": ",
 conditionMessage(e))
