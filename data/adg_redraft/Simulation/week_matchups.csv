@@ -1,9 +1,9 @@
 "week","team_roster_id","Team","team_win_pct","opponent_roster_id","Opponent","opponent_win_pct"
-1,1,"KING COMMISH",0.768,2,"Gus Buck",0.232
-1,3,"Kellen McHugh",0.768,5,"Ethan Thimme",0.232
-1,7,"Jack Huff",0.884,11,"Will Allemang",0.116
-1,9,"Gabe Lewitt",0.208,12,"Ethan Purdy",0.792
-1,8,"Tommy Pack",0.276,13,"Bryan Birk",0.724
-1,10,"Colin Kelly",0.228,14,"Connor Helgeson",0.772
-1,4,"Elijah Sartin",0.208,15,"Jon Michael Gaudin",0.792
-1,6,"Neal Adams",0.32,16,"Caleb Garcia",0.68
+1,2,"Gus Buck",0.2,5,"Ethan Thimme",0.8
+1,4,"Elijah Sartin",0.492,7,"Jack Huff",0.508
+1,8,"Tommy Pack",0.328,10,"Colin Kelly",0.672
+1,6,"Neal Adams",0.796,11,"Will Allemang",0.204
+1,3,"Kellen McHugh",0.904,13,"Bryan Birk",0.096
+1,9,"Gabe Lewitt",0.524,14,"Connor Helgeson",0.476
+1,1,"KING COMMISH",0.384,15,"Jon Michael Gaudin",0.616
+1,12,"Ethan Purdy",0.672,16,"Caleb Garcia",0.328
